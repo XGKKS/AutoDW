@@ -1,0 +1,4 @@
+- [x] Checkpoint 1: 修改 `generate_table_name()` 方法提取纯表名 ✓ 通过
+- [x] Checkpoint 2: 修改 `translate_table_name()` 方法保持一致性 ✓ 通过
+- [x] Checkpoint 3: 测试验证PostgreSQL表名不再出现三重重复 ✓ 通过
+- [x] Checkpoint 4: 测试验证MySQL表名生成正确 ✓ 通过

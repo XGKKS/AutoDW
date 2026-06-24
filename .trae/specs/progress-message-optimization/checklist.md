@@ -1,0 +1,9 @@
+- [x] Checkpoint 1: jieba分词完成时进度消息格式为"分词：分词XX个，去重后YY个"
+- [x] Checkpoint 2: 分词完成消息包含所有分词数量（不去重）
+- [x] Checkpoint 3: 分词完成消息包含去重后的词根数量
+- [x] Checkpoint 4: 历史词根匹配完成时进度消息格式为"历史词根匹配X个，LLM需生成N个，共M个"
+- [x] Checkpoint 5: 匹配完成消息包含匹配数量
+- [x] Checkpoint 6: 匹配完成消息包含LLM需生成数量
+- [x] Checkpoint 7: 匹配完成消息包含总词根数量
+- [x] Checkpoint 8: 测试脚本验证分词进度消息格式正确
+- [x] Checkpoint 9: 测试脚本验证词根匹配进度消息格式正确

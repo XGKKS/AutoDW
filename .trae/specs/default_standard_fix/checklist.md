@@ -1,0 +1,6 @@
+- [x] Checkpoint 1: 后端支持 `default` 规范的启用操作
+- [x] Checkpoint 2: 后端返回默认规范的正确激活状态
+- [x] Checkpoint 3: 前端禁用默认规范的删除按钮
+- [x] Checkpoint 4: 测试验证默认规范可以启用
+- [x] Checkpoint 5: 测试验证默认规范显示正确状态
+- [x] Checkpoint 6: 测试验证默认规范无法删除

@@ -1,0 +1,13 @@
+[
+  {
+    "id": "123824ff",
+    "name": "xibei",
+    "db_type": "mysql",
+    "host": "47.105.110.92",
+    "port": 3306,
+    "database": "xb_bigdata",
+    "username": "xibei",
+    "password_encrypted": "gAAAAABqL_w9qJ3UV2UBZK1GODOaOHkkEtGHB_7o648dz3MgIrA6QU1Mky4MHtx0uq9dgKO3Rkc7_7gJQAjD4GwnONCIeCXPHg==",
+    "updated_at": "2026-06-15T21:21:01.446815"
+  }
+]

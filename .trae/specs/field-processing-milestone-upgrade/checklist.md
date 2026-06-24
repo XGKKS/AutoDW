@@ -1,0 +1,13 @@
+- [x] Checkpoint 1: 后端 update_progress 函数已扩展里程碑到8步
+- [x] Checkpoint 2: 第3步标题为"jieba分词"
+- [x] Checkpoint 3: 第4步标题为"历史词根匹配"（新增步骤）
+- [x] Checkpoint 4: tokenize_all_fields_root_level 方法使用步骤编号3
+- [x] Checkpoint 5: match_roots_against_history 方法添加了进度更新（步骤编号4）
+- [x] Checkpoint 6: 生成字段名步骤编号调整为5
+- [x] Checkpoint 7: 组装DDL步骤编号调整为6
+- [x] Checkpoint 8: 最终校验步骤编号调整为7
+- [x] Checkpoint 9: 完成建表步骤编号调整为8
+- [x] Checkpoint 10: 子进度处理逻辑支持新的步骤编号
+- [x] Checkpoint 11: 测试脚本验证里程碑数量为8
+- [x] Checkpoint 12: 测试脚本验证所有步骤都能正确完成
+- [x] Checkpoint 13: 前端能正确显示8步里程碑

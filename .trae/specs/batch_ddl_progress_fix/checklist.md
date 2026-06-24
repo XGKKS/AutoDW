@@ -1,0 +1,6 @@
+- [x] Checkpoint 1: 后端已在任务完成后清除 `progress_store` 中的进度数据
+- [x] Checkpoint 2: 前端已添加对 `code === 1` 响应的处理逻辑
+- [x] Checkpoint 3: 前端收到任务完成信号后调用 `fetchBatchResult()`
+- [x] Checkpoint 4: 测试验证进度API返回 `code === 1` 表示任务已完成
+- [x] Checkpoint 5: 测试验证前端停止轮询后不再发送进度请求
+- [x] Checkpoint 6: 测试验证批量建表完成后前端能正确显示DDL结果

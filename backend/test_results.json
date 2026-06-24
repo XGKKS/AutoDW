@@ -1,0 +1,32 @@
+[
+  {
+    "success": true,
+    "elapsed": 81.87994241714478,
+    "ddl_length": 1202,
+    "extracted_roots_count": 0
+  },
+  {
+    "success": true,
+    "elapsed": 100.63986468315125,
+    "ddl_length": 1249,
+    "extracted_roots_count": 0
+  },
+  {
+    "success": true,
+    "elapsed": 87.87171816825867,
+    "ddl_length": 1144,
+    "extracted_roots_count": 0
+  },
+  {
+    "success": true,
+    "elapsed": 63.47611117362976,
+    "ddl_length": 1058,
+    "extracted_roots_count": 0
+  },
+  {
+    "success": true,
+    "elapsed": 88.43812775611877,
+    "ddl_length": 1121,
+    "extracted_roots_count": 0
+  }
+]

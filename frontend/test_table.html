@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Markdown Table Test</title>
+  <style>
+    table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background-color: #f2f2f2; }
+    code { background: #f4f4f4; padding: 2px 4px; border-radius: 3px; }
+    .preview-content { font-family: sans-serif; line-height: 1.6; }
+    .preview-content table { display: table; }
+    .preview-content td, .preview-content th { display: table-cell; }
+  </style>
+</head>
+<body>
+  <h1>Markdown Table Test</h1>
+  <div id="result"></div>
+  
+  <script>
+    function processTables(html) {
+      const lines = html.split('\n')
+      let result = []
+      let inTable = false
+      let headerProcessed = false
+      
+      for (let line of lines) {
+        const trimmedLine = line.trimStart()
+        const tableMatch = trimmedLine.match(/^\|([\s\S]*)\|?$/)
+        
+        console.log('Line:', JSON.stringify(line), '| Trimmed:', JSON.stringify(trimmedLine), '| Match:', tableMatch ? 'YES' : 'NO')
+        
+        if (tableMatch) {
+          if (!inTable) {
+            result.push('<table>')
+            inTable = true
+            headerProcessed = false
+          }
+          
+          const content = trimmedLine.replace(/^\|/, '').replace(/\|$/, '')
+          const parts = content.split('|').map(p => p.trim()).filter(p => p)
+          
+          if (!headerProcessed && parts.length > 0) {
+            result.push('<thead><tr><th>' + parts.join('</th><th>') + '</th></tr></thead><tbody>')
+            headerProcessed = true
+          } else if (trimmedLine.includes('---') && !trimmedLine.includes('|')) {
+            continue
+          } else if (!trimmedLine.includes('---') || trimmedLine.includes('|')) {
+            result.push('<tr><td>' + parts.join('</td><td>') + '</td></tr>')
+          }
+        } else {
+          if (inTable) {
+            result.push('</tbody></table>')
+            inTable = false
+          }
+          result.push(line)
+        }
+      }
+      
+      if (inTable) {
+        result.push('</tbody></table>')
+      }
+      
+      return result.join('\n')
+    }
+
+    function renderMarkdown(text) {
+      if (!text) return ''
+      
+      let html = text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+      
+      html = html.replace(/^##### (.+)$/gm, '<h5>$1</h5>')
+      html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>')
+      html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>')
+      html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>')
+      html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>')
+      
+      html = html.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
+      
+      html = processTables(html)
+      
+      html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
+      html = html.replace(/~~(.+?)~~/g, '<s>$1</s>')
+      html = html.replace(/__(.+?)__/g, '<u>$1</u>')
+      
+      html = html.replace(/`([^`]+)`/g, '<code>$1</code>')
+      html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre class="code-block"><code>$2</code></pre>')
+      
+      html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
+      html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" />')
+      
+      html = html.replace(/\n/g, '<br>')
+      
+      html = html.replace(/<\/?(ul|ol|li|table|tr|td|th|pre|blockquote)><br>/g, '</$1>')
+      html = html.replace(/<br><(ul|ol|li|table|tr|td|th|pre|blockquote)/g, '<$1')
+      
+      return html
+    }
+
+    const testInput = `| 主题 | 缩写 | 说明 | 
+|------|------|------| 
+| 公共 | \`pub\` | public，跨业务通用 | 
+| 用户 | \`user\` | 用户相关 |`;
+
+    console.log('=== TEST INPUT ===')
+    console.log(testInput)
+    console.log('\n=== HTML OUTPUT ===')
+    const output = renderMarkdown(testInput)
+    console.log(output)
+    console.log('\n=== RENDERED RESULT ===')
+    document.getElementById('result').innerHTML = output
+  </script>
+</body>
+</html>
