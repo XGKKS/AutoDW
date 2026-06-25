@@ -2,7 +2,9 @@
 from typing import Dict, Iterable, List, Tuple
 
 
-ABBR_MAX_LEN = 4
+DEFAULT_ABBR_MAX_LEN = 4
+MIN_ABBR_MAX_LEN = 1
+MAX_ABBR_MAX_LEN = 12
 LAYER_PREFIXES = ("ods", "dim", "dwd", "dws", "ads", "input")
 CONFLICTING_LEADING_DOMAIN_PREFIXES = {"pub", "scm"}
 
@@ -10,23 +12,45 @@ CONFLICTING_LEADING_DOMAIN_PREFIXES = {"pub", "scm"}
 FULL_ROOT_CONSTRAINTS = """[Root naming rules] These are mandatory rules and must be followed strictly.\n1. In full mode, field names and table-name bodies may only use full roots (`full_root`).\n2. Do not use abbreviated roots (`abbr_root`) in full mode, even if they exist in the root library.\n3. Separate words with underscores and keep everything lowercase.\n4. Newly generated roots must be complete English words; do not truncate or abbreviate them."""
 
 
-ABBR_ROOT_CONSTRAINTS = f"""[Root naming rules] These are mandatory rules and must be followed strictly.\n1. In abbreviation mode, field names and table-name bodies may only use abbreviated roots (`abbr_root`).\n2. Each abbreviated root must be at most {ABBR_MAX_LEN} characters long.\n3. Separate words with underscores and keep everything lowercase.\n4. Newly generated roots must also follow the same abbreviation-length limit."""
+def resolve_abbr_max_len(abbr_max_len: int = DEFAULT_ABBR_MAX_LEN) -> int:
+    try:
+        value = int(abbr_max_len)
+    except (TypeError, ValueError):
+        value = DEFAULT_ABBR_MAX_LEN
+    return max(MIN_ABBR_MAX_LEN, min(MAX_ABBR_MAX_LEN, value))
 
 
 ROOT_REUSE_FULL = "[Root reuse principle] Use only full roots (`full_root`) and never abbreviations. The same Chinese business concept must map to the same English full root across the warehouse."
-ROOT_REUSE_ABBR = f"[Root reuse principle] Use only abbreviated roots (`abbr_root`), each no longer than {ABBR_MAX_LEN} characters. The same Chinese business concept must map to the same English abbreviated root across the warehouse."
 
 
 def normalize_priority(priority: str) -> str:
     return "abbr" if priority == "abbr" else "full"
 
 
-def get_root_constraints(priority: str) -> str:
-    return ABBR_ROOT_CONSTRAINTS if normalize_priority(priority) == "abbr" else FULL_ROOT_CONSTRAINTS
+def get_root_constraints(priority: str, abbr_max_len: int = DEFAULT_ABBR_MAX_LEN) -> str:
+    if normalize_priority(priority) != "abbr":
+        return FULL_ROOT_CONSTRAINTS
+
+    max_len = resolve_abbr_max_len(abbr_max_len)
+    return (
+        "[Root naming rules] These are mandatory rules and must be followed strictly.\n"
+        "1. In abbreviation mode, field names and table-name bodies may only use abbreviated roots (`abbr_root`).\n"
+        f"2. Each abbreviated root must be at most {max_len} characters long.\n"
+        "3. Separate words with underscores and keep everything lowercase.\n"
+        "4. Newly generated roots must also follow the same abbreviation-length limit."
+    )
 
 
-def get_root_reuse_principle(priority: str) -> str:
-    return ROOT_REUSE_ABBR if normalize_priority(priority) == "abbr" else ROOT_REUSE_FULL
+def get_root_reuse_principle(priority: str, abbr_max_len: int = DEFAULT_ABBR_MAX_LEN) -> str:
+    if normalize_priority(priority) != "abbr":
+        return ROOT_REUSE_FULL
+
+    max_len = resolve_abbr_max_len(abbr_max_len)
+    return (
+        "[Root reuse principle] Use only abbreviated roots (`abbr_root`), "
+        f"each no longer than {max_len} characters. The same Chinese business concept "
+        "must map to the same English abbreviated root across the warehouse."
+    )
 
 
 DEFAULT_THEME_PREFIXES = {
@@ -237,10 +261,12 @@ def validate_identifier_mode(
     full_roots: set,
     abbr_roots: set,
     abbr_to_full: Dict[str, List[str]] = None,
+    abbr_max_len: int = DEFAULT_ABBR_MAX_LEN,
 ) -> List[str]:
     errors = []
     mode = normalize_priority(priority)
     abbr_to_full = abbr_to_full or {}
+    max_len = resolve_abbr_max_len(abbr_max_len)
     full_root_words = set()
     if mode == "full":
         for full_root in full_roots:
@@ -251,8 +277,8 @@ def validate_identifier_mode(
             suggestions = abbr_to_full.get(root, [])
             suffix = f", consider using {', '.join(suggestions)}" if suggestions else ""
             errors.append(f"identifier '{identifier}' uses abbreviated root '{root}'{suffix}")
-        elif mode == "abbr" and len(root) > ABBR_MAX_LEN:
-            errors.append(f"identifier '{identifier}' contains abbreviated root '{root}' longer than {ABBR_MAX_LEN} characters")
+        elif mode == "abbr" and len(root) > max_len:
+            errors.append(f"identifier '{identifier}' contains abbreviated root '{root}' longer than {max_len} characters")
 
     return errors
 
@@ -264,12 +290,13 @@ def filter_translation_by_mode(
     full_roots: set,
     abbr_roots: set,
     abbr_to_full: Dict[str, List[str]] = None,
+    abbr_max_len: int = DEFAULT_ABBR_MAX_LEN,
 ) -> Tuple[bool, str]:
     root = (english_root or "").strip().strip("`\"'").rstrip("_").lower()
     if not root:
         return False, "root is empty"
 
-    errors = validate_identifier_mode(root, priority, full_roots, abbr_roots, abbr_to_full)
+    errors = validate_identifier_mode(root, priority, full_roots, abbr_roots, abbr_to_full, abbr_max_len)
     if errors:
         return False, f"{chinese_root}: {'; '.join(errors)}"
     return True, root

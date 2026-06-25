@@ -12,7 +12,7 @@ import jieba
 from app.field_type_resolver import get_excel_field_type, resolve_field_type
 from app.name_normalizer import NameNormalizer, VALIDATION_ROOT_TOKENS
 from app.root_policy import (
-
+    DEFAULT_ABBR_MAX_LEN,
     build_root_sets,
     ensure_theme_prefix,
     filter_translation_by_mode,
@@ -23,6 +23,7 @@ from app.root_policy import (
     normalize_table_business_domain,
     normalize_priority,
     render_theme_prefix_guide,
+    resolve_abbr_max_len,
     validate_identifier_mode,
 )
 
@@ -106,7 +107,7 @@ class FieldProcessor:
     def __init__(self, api_key: str, api_url: str, model: str, temperature: float = 0.3, 
                  task_id: str = None, progress_callback=None, max_workers: int = 5,
                  custom_prompt: str = "", word_roots: list = None, root_match_priority: str = 'full',
-                 cut_mode: str = "accurate", standards: str = ""):
+                 cut_mode: str = "accurate", standards: str = "", abbr_max_len: int = DEFAULT_ABBR_MAX_LEN):
         self.api_key = api_key
         self.api_url = api_url
         self.model = model
@@ -125,6 +126,7 @@ class FieldProcessor:
         self.field_stats = None  # 保存字段统计信息
         self.cut_mode = cut_mode  # normalize and tokenize naming inputs
         self.standards = standards
+        self.abbr_max_len = resolve_abbr_max_len(abbr_max_len)
         self.name_normalizer = NameNormalizer()
         for term in self.name_normalizer.iter_custom_terms():
             try:
@@ -134,7 +136,7 @@ class FieldProcessor:
         self.full_root_set, self.abbr_root_set, self.abbr_to_full_roots = build_root_sets(self.word_roots)
         for token in VALIDATION_ROOT_TOKENS:
             self.full_root_set.add(token)
-            if len(token) <= 4:
+            if len(token) <= self.abbr_max_len:
                 self.abbr_root_set.add(token)
         
         # 构建历史词根映射表（中文 -> 英文）
@@ -163,7 +165,7 @@ class FieldProcessor:
         logger.info(f"【字段级处理】映射表中包含的词根示例（前10条）: {list(self.existing_root_map.keys())[:10]}")
 
     def _root_style_guide(self) -> str:
-        return get_root_constraints(self.root_match_priority)
+        return get_root_constraints(self.root_match_priority, self.abbr_max_len)
 
     def _choose_root_by_priority(self, root_info: dict) -> str:
         if normalize_priority(self.root_match_priority) == 'abbr':
@@ -184,7 +186,8 @@ class FieldProcessor:
             self.root_match_priority,
             self.full_root_set,
             self.abbr_root_set,
-            self.abbr_to_full_roots
+            self.abbr_to_full_roots,
+            self.abbr_max_len,
         )
         for error in errors:
             logger.warning(f"【字段级处理】{context}不符合词根优先级: {error}")
@@ -200,7 +203,8 @@ class FieldProcessor:
             self.root_match_priority,
             self.full_root_set,
             self.abbr_root_set,
-            self.abbr_to_full_roots
+            self.abbr_to_full_roots,
+            self.abbr_max_len,
         )
         if not is_valid:
             logger.warning(f"??????????????????????????????: {result}")
@@ -211,7 +215,7 @@ class FieldProcessor:
         return result
     def _available_roots_for_priority(self) -> List[str]:
         if normalize_priority(self.root_match_priority) == 'abbr':
-            return sorted(root for root in self.abbr_root_set if len(root) <= 4)
+            return sorted(root for root in self.abbr_root_set if len(root) <= self.abbr_max_len)
         return sorted(self.full_root_set)
 
     def _mode_safe_table_fallback(self) -> str:
@@ -238,7 +242,8 @@ class FieldProcessor:
             logger.warning("LLM returned reasoning_content but no final content; treating response as empty")
         return ""
 
-    def _short_hash_token(self, text: str, prefix: str = "x", max_len: int = 4) -> str:
+    def _short_hash_token(self, text: str, prefix: str = "x", max_len: int = None) -> str:
+        max_len = self.abbr_max_len if max_len is None else max_len
         digest = hashlib.md5((text or "").encode("utf-8")).hexdigest()
         return f"{prefix}{digest}"[:max_len]
 
@@ -249,11 +254,11 @@ class FieldProcessor:
             return ""
         if len(parts) == 1:
             part = parts[0]
-            if len(part) <= 4:
+            if len(part) <= self.abbr_max_len:
                 return part
             consonants = "".join(ch for ch in part if ch not in "aeiou")
-            return consonants[:4] or part[:4]
-        return "".join(part[0] for part in parts if part)[:4]
+            return consonants[:self.abbr_max_len] or part[:self.abbr_max_len]
+        return "".join(part[0] for part in parts if part)[:self.abbr_max_len]
 
     def _has_hash_root_token(self, identifier: str) -> bool:
         normalized = self.name_normalizer.normalize_english_identifier(identifier)
@@ -272,7 +277,9 @@ class FieldProcessor:
 
     def _is_safe_table_body(self, table_name: str, theme_prefix: str = "") -> bool:
         normalized = self.name_normalizer.normalize_english_identifier(table_name)
-        if not self._is_safe_generated_identifier(normalized, "table name"):
+        if not normalized or self._contains_chinese(normalized) or self._has_hash_root_token(normalized):
+            return False
+        if not re.fullmatch(r"[a-z][a-z0-9_]*", normalized):
             return False
 
         parts = [part for part in normalized.split("_") if part]
@@ -289,6 +296,35 @@ class FieldProcessor:
         if selected_theme and parts[0] == selected_theme and len(parts) < 2:
             return False
         return True
+
+    def _is_deepseek_native_api(self) -> bool:
+        normalized = (self.api_url or '').strip().rstrip('/').lower()
+        if normalized.endswith('/chat/completions'):
+            normalized = normalized[:-len('/chat/completions')].rstrip('/')
+        return normalized == 'https://api.deepseek.com'
+
+    def _build_llm_url(self) -> str:
+        api_url = self.api_url.rstrip('/')
+        if api_url.endswith('/chat/completions'):
+            return api_url
+        return f"{api_url}/chat/completions"
+
+    def _prepare_llm_payload(self, payload: dict) -> dict:
+        request_payload = dict(payload)
+        if self._is_deepseek_native_api():
+            request_payload['thinking'] = {'type': 'disabled'}
+        return request_payload
+
+    def _post_llm(self, payload: dict, timeout: int):
+        return requests.post(
+            self._build_llm_url(),
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            },
+            json=self._prepare_llm_payload(payload),
+            timeout=timeout
+        )
 
     def _fallback_root_for_mode(self, chinese_root: str, preferred_english: str = "") -> str:
         cleaned_root = self.name_normalizer.clean_chinese_text(chinese_root) or str(chinese_root or "").strip()
@@ -415,7 +451,7 @@ class FieldProcessor:
     def _compose_field_name_from_roots(self, chinese_name: str) -> Optional[str]:
         roots = self.field_tokenization.get(chinese_name, [])
         if not roots:
-            logger.warning(f"【字段级处理】字段 '{chinese_name}' 没有分词结果，无法组装字段名")
+            logger.warning(f"????????? '{chinese_name}' ??????????????")
             return None
 
         english_parts = []
@@ -426,22 +462,10 @@ class FieldProcessor:
             english_parts.append(english_root)
 
         english_name = '_'.join(english_parts).lower()
-        return self._ensure_identifier_by_priority(english_name, f"字段词根组装 {chinese_name}")
-    def _render_custom_prompt_root_mode(self) -> str:
-        rendered = self.custom_prompt or ""
-        replacements = {
-            "{root_constraints}": self._root_style_guide(),
-            "{root_reuse_principle}": get_root_reuse_principle(self.root_match_priority),
-            "{standards_content}": self.standards,
-            "{word_roots_content}": "",
-            "{description}": "",
-            "{db_type}": "",
-            "{db_example}": "",
-            "{root_match_priority}": self.root_match_priority,
-        }
-        for placeholder, value in replacements.items():
-            rendered = rendered.replace(placeholder, value)
-        return rendered
+        normalized_name = self.name_normalizer.normalize_english_identifier(english_name)
+        if not normalized_name:
+            return None
+        return normalized_name
     
     def match_existing_root(self, chinese_name: str) -> Optional[tuple]:
         """
@@ -746,11 +770,6 @@ class FieldProcessor:
         
         prompt = self.build_prompt_for_batch(batch)
         
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
         data = {
             "model": self.model,
             "messages": [
@@ -760,19 +779,8 @@ class FieldProcessor:
             "max_tokens": 2048,
             "temperature": self.temperature
         }
-        
-        def build_llm_url(api_url: str) -> str:
-            api_url = api_url.rstrip('/')
-            if api_url.endswith('/chat/completions'):
-                return api_url
-            return f"{api_url}/chat/completions"
-        
-        response = requests.post(
-            build_llm_url(self.api_url),
-            headers=headers,
-            json=data,
-            timeout=300
-        )
+
+        response = self._post_llm(data, timeout=300)
         
         if response.status_code != 200:
             logger.error(f"LLM调用失败: {response.status_code}")
@@ -842,7 +850,7 @@ class FieldProcessor:
             table_name_example=table_name_example,
             available_roots=", ".join(self._available_roots_for_priority()) or "无",
             root_constraints=self._root_style_guide(),
-            root_reuse_principle=get_root_reuse_principle(self.root_match_priority)
+            root_reuse_principle=get_root_reuse_principle(self.root_match_priority, self.abbr_max_len)
         )
         prompt += THEME_PREFIX_PROMPT_BLOCK.format(
             theme_prefix=theme_prefix,
@@ -850,11 +858,6 @@ class FieldProcessor:
         )
         
         # 调用LLM
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
         data = {
             "model": self.model,
             "messages": [
@@ -864,25 +867,17 @@ class FieldProcessor:
             "max_tokens": 64,
             "temperature": 0.1
         }
-        
-        def build_llm_url(api_url: str) -> str:
-            api_url = api_url.rstrip('/')
-            if api_url.endswith('/chat/completions'):
-                return api_url
-            return f"{api_url}/chat/completions"
-        
+
         try:
-            response = requests.post(
-                build_llm_url(self.api_url),
-                headers=headers,
-                json=data,
-                timeout=60
-            )
+            response = self._post_llm(data, timeout=60)
             
             if response.status_code == 200:
                 response.encoding = 'utf-8'
                 result = response.json()
                 table_name = self._extract_llm_content(result)
+                if not table_name:
+                    logger.warning(f"【字段级处理】表名生成响应为空，改用动态词根fallback: '{chinese_table_name}'")
+                    return self.translate_table_name(chinese_table_name, layer)
                 logger.info(f"【字段级处理】表名生成成功: '{chinese_table_name}' -> '{table_name}'")
                 
                 # 处理LLM返回的表名，提取纯表名部分
@@ -913,9 +908,9 @@ class FieldProcessor:
                     standards_content,
                     layer
                 )
-                if self._validate_identifier_by_priority(table_name, f"LLM表名 {chinese_table_name}"):
+                if self._is_safe_table_body(table_name, theme_prefix):
                     return table_name
-                logger.warning(f"【字段级处理】LLM表名不符合当前词根模式，改用动态词根fallback: {table_name}")
+                logger.warning(f"【字段级处理】LLM表名不符合表名规则，改用动态词根fallback: {table_name}")
                 return self.translate_table_name(chinese_table_name, layer)
             else:
                 logger.error(f"【字段级处理】表名生成失败: HTTP {response.status_code}")
@@ -1133,10 +1128,6 @@ class FieldProcessor:
 
 不要输出任何解释，只输出词根映射。"""
 
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
         data = {
             "model": self.model,
             "messages": [
@@ -1147,19 +1138,8 @@ class FieldProcessor:
             "temperature": 0.1
         }
 
-        def build_llm_url(api_url: str) -> str:
-            api_url = api_url.rstrip('/')
-            if api_url.endswith('/chat/completions'):
-                return api_url
-            return f"{api_url}/chat/completions"
-
         try:
-            response = requests.post(
-                build_llm_url(self.api_url),
-                headers=headers,
-                json=data,
-                timeout=300
-            )
+            response = self._post_llm(data, timeout=300)
 
             if response.status_code != 200:
                 logger.error(f"词根语义归一LLM调用失败: {response.status_code}")
@@ -1311,11 +1291,6 @@ class FieldProcessor:
 不要输出任何解释，只输出词根映射。"""
         
         try:
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
-            
             # 构建system prompt：开发规范 + 角色定义
             if self.standards:
                 system_content = f"""你是一位数据仓库专家，请根据中文业务词根生成符合规范的英文翻译。
@@ -1342,19 +1317,8 @@ class FieldProcessor:
                 "max_tokens": 2048,
                 "temperature": self.temperature
             }
-            
-            def build_llm_url(api_url: str) -> str:
-                api_url = api_url.rstrip('/')
-                if api_url.endswith('/chat/completions'):
-                    return api_url
-                return f"{api_url}/chat/completions"
-            
-            response = requests.post(
-                build_llm_url(self.api_url),
-                headers=headers,
-                json=data,
-                timeout=300
-            )
+
+            response = self._post_llm(data, timeout=300)
             
             if response.status_code != 200:
                 logger.error(f"LLM调用失败: {response.status_code}")
@@ -1540,11 +1504,6 @@ class FieldProcessor:
         prompt = self.build_layer3_prompt(fields_batch)
         
         try:
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
-            
             data = {
                 "model": self.model,
                 "messages": [
@@ -1554,26 +1513,15 @@ class FieldProcessor:
                 "max_tokens": 4096,
                 "temperature": self.temperature
             }
-            
-            def build_llm_url(api_url: str) -> str:
-                api_url = api_url.rstrip('/')
-                if api_url.endswith('/chat/completions'):
-                    return api_url
-                return f"{api_url}/chat/completions"
-            
-            response = requests.post(
-                build_llm_url(self.api_url),
-                headers=headers,
-                json=data,
-                timeout=300
-            )
+
+            response = self._post_llm(data, timeout=300)
             
             if response.status_code != 200:
                 logger.error(f"Layer3 LLM调用失败: {response.status_code}")
                 return {}
             
             result = response.json()
-            content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            content = self._extract_llm_content(result)
             
             return self.parse_layer3_output(content.split('\n'))
             
@@ -1885,12 +1833,18 @@ class FieldProcessor:
             return rebuilt
 
         base = re.sub(r"(^|_)x[0-9a-f]{2,}(?=_|$)", "_", candidate).strip("_")
-        base = self.name_normalizer.normalize_english_identifier(base) or "field"
+        base = self.name_normalizer.normalize_english_identifier(base)
+        if normalize_priority(self.root_match_priority) == "abbr":
+            base = self._abbr_from_english(base) or "fld"
+        else:
+            base = base or "field"
         if not re.match(r"^[a-z]", base):
-            base = f"field_{base}"
+            base = f"f_{base}" if normalize_priority(self.root_match_priority) == "abbr" else f"field_{base}"
         suffix = 2
         repaired = base
         while repaired in used_names or not self._is_safe_generated_identifier(repaired, f"dedup field {chinese_name}"):
+            if suffix > 200:
+                raise ValueError(f"字段 '{chinese_name}' 缺少符合当前词根模式的词根翻译，无法生成DDL")
             repaired = f"{base}_{suffix}"
             suffix += 1
         logger.warning(f"Field name repaired for '{chinese_name}': '{candidate}' -> '{repaired}'")
@@ -1905,17 +1859,21 @@ class FieldProcessor:
             repaired_rows.append((chinese_name, repaired_name, final_type))
         return repaired_rows
 
-    def _repair_table_name(self, chinese_table_name: str, candidate: str = "", layer: str = "") -> str:
+    def _repair_table_name(self, chinese_table_name: str, candidate: str = "", layer: str = "", theme_prefix: str = "") -> str:
         candidate = self.name_normalizer.normalize_english_identifier(candidate)
         if candidate:
             parts = [part for part in candidate.split("_") if part and part != layer]
             candidate = "_".join(parts)
-        if candidate and self._is_safe_generated_identifier(candidate, f"table {chinese_table_name}"):
+        if candidate and self._is_safe_table_body(candidate, theme_prefix):
             return candidate
 
-        fallback = self._mode_safe_table_fallback()
-        logger.warning(f"Table name repaired for '{chinese_table_name}': '{candidate}' -> '{fallback}'")
-        return fallback
+        fallback = self.translate_table_name(chinese_table_name, layer, theme_prefix)
+        if fallback and fallback != candidate and self._is_safe_table_body(fallback, theme_prefix):
+            logger.warning(f"Table name repaired for '{chinese_table_name}': '{candidate}' -> '{fallback}'")
+            return fallback
+
+        logger.warning(f"Table name repair failed for '{chinese_table_name}': '{candidate}'")
+        raise ValueError(f"表 '{chinese_table_name}' 缺少符合规范的业务表名，无法生成DDL")
 
     def generate_ddl_for_table(self, table_name, table_info, field_mapping, 
                                db_type='mysql', root_match_priority='full',
@@ -1936,7 +1894,7 @@ class FieldProcessor:
             standards_content,
             layer
         )
-        english_table_name = self._repair_table_name(table_name, english_table_name, layer)
+        english_table_name = self._repair_table_name(table_name, english_table_name, layer, theme_prefix)
         
         field_definitions = []
         field_comments = []
@@ -2030,8 +1988,14 @@ COMMENT ON TABLE {full_table_name} IS '{table_name}';"""
         english_parts = []
         semantic_name = self._semantic_table_name_from_keywords(cleaned_name, layer)
         matched_from_root_library = bool(semantic_name)
+        partial_table_match = False
         if semantic_name:
             english_parts = semantic_name.split('_')
+            if len(english_parts) < 2:
+                logger.warning(f"【字段级处理】表名只匹配到部分历史词根: '{chinese_table_name}' -> '{semantic_name}'")
+                english_parts = []
+                matched_from_root_library = False
+                partial_table_match = True
         else:
             translated_parts = []
             all_parts_translated = bool(parts)
@@ -2045,13 +2009,15 @@ COMMENT ON TABLE {full_table_name} IS '{table_name}';"""
             if all_parts_translated:
                 english_parts = translated_parts
 
-        if not english_parts:
+        if not english_parts and not partial_table_match:
             split_parts = self._try_split_and_match(cleaned_name)
             if split_parts:
                 english_parts.extend(split_parts)
 
-        if not english_parts:
-            english_parts = [self._fallback_root_for_mode(cleaned_name or chinese_table_name)]
+        if not english_parts and not partial_table_match:
+            fallback_part = self._fallback_root_for_mode(cleaned_name or chinese_table_name)
+            if fallback_part:
+                english_parts = [fallback_part]
 
         english_name = '_'.join(english_parts)
 
@@ -2065,7 +2031,7 @@ COMMENT ON TABLE {full_table_name} IS '{table_name}';"""
                 new_parts = [p for p in parts if p != layer_lower]
                 if new_parts:
                     english_name = '_'.join(new_parts)
-                    if '_' not in english_name and len(english_name) <= 4:
+                    if '_' not in english_name and len(english_name) <= self.abbr_max_len:
                         english_name += '_info'
 
         if theme_prefix and not matched_from_root_library:
@@ -2077,11 +2043,14 @@ COMMENT ON TABLE {full_table_name} IS '{table_name}';"""
             layer
         )
         english_name = self.name_normalizer.normalize_english_identifier(english_name)
-        if self._validate_identifier_by_priority(english_name, f"fallback表名 {chinese_table_name}"):
+        if self._is_safe_table_body(english_name, theme_prefix):
             logger.info(f"【字段级处理】表名转换结果: '{chinese_table_name}' -> '{english_name}'")
             return english_name
 
         english_name = self._ensure_identifier_by_priority(english_name, f"fallback表名 {chinese_table_name}")
+        if not self._is_safe_table_body(english_name, theme_prefix):
+            logger.warning(f"【字段级处理】表名兜底转换失败: '{chinese_table_name}' -> '{english_name}'")
+            raise ValueError(f"表 '{chinese_table_name}' 缺少符合规范的业务表名，无法生成DDL")
         logger.info(f"【字段级处理】表名兜底转换结果: '{chinese_table_name}' -> '{english_name}'")
         return english_name
     def build_field_mapping(self, file_content):
@@ -2136,6 +2105,7 @@ COMMENT ON TABLE {full_table_name} IS '{table_name}';"""
         success_count = sum(1 for ddl in results.values() if not ddl.startswith("-- 生成失败"))
         logger.info(f"【字段级处理】所有表DDL生成完成，成功 {success_count} 张，失败 {len(results) - success_count} 张")
         return results
+
 
 
 

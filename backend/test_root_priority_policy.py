@@ -59,6 +59,24 @@ def test_abbr_mode_rejects_long_roots():
     assert "超过 4 个字母" in messages
 
 
+def test_abbr_mode_accepts_custom_max_len():
+    ddl = """CREATE TABLE `dwd_inb_dtl` (
+    `warehouse_id` VARCHAR(64) COMMENT '仓库ID'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='入库明细表';"""
+
+    violations = DDLValidator(WORD_ROOTS, root_match_priority="abbr", abbr_max_len=10).validate(ddl)
+    messages = "\n".join(error_messages(violations))
+
+    assert "warehouse" not in messages
+
+
+def test_field_processor_uses_custom_abbr_max_len():
+    processor = FieldProcessor("", "", "", word_roots=WORD_ROOTS, root_match_priority="abbr", abbr_max_len=6)
+
+    assert processor._abbr_from_english("customer") == "cstmr"
+    assert processor._filter_translation_by_priority("仓库", "whouse") == "whouse"
+
+
 def test_layer1_uses_selected_root_mode():
     full_processor = FieldProcessor("", "", "", word_roots=WORD_ROOTS, root_match_priority="full")
     abbr_processor = FieldProcessor("", "", "", word_roots=WORD_ROOTS, root_match_priority="abbr")

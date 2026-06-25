@@ -121,10 +121,10 @@
                   </el-form-item>
                 </el-form>
               </div>
-              <div class="llm-form-right">
-                <div class="temperature-section">
-                  <div class="section-title">🌡️ Temperature</div>
-                  <div class="temperature-config-horizontal">
+                <div class="llm-form-right">
+                  <div class="temperature-section">
+                    <div class="section-title">🌡️ Temperature</div>
+                    <div class="temperature-config-horizontal">
                     <el-slider
                       v-model="llmConfig.temperature"
                       :min="0"
@@ -143,13 +143,36 @@
                       style="width: 90px"
                     />
                   </div>
-                  <div class="temperature-hint">
-                    <span>控制输出随机性：0=确定性输出，1=创意输出。推荐值：0.3（DDL生成）</span>
+                    <div class="temperature-hint">
+                      <span>控制输出随机性：0=确定性输出，1=创意输出。推荐值：0.3（DDL生成）</span>
+                    </div>
+                    <div class="config-divider"></div>
+                    <div class="section-title">🔤 缩写最大字母数</div>
+                    <div class="temperature-config-horizontal">
+                      <el-slider
+                        v-model="llmConfig.abbrMaxLen"
+                        :min="1"
+                        :max="12"
+                        :step="1"
+                        :marks="{1:'1', 4:'4', 8:'8', 12:'12'}"
+                        style="flex: 1; margin-right: 15px"
+                      />
+                      <el-input-number
+                        v-model="llmConfig.abbrMaxLen"
+                        :min="1"
+                        :max="12"
+                        :step="1"
+                        controls-position="right"
+                        style="width: 90px"
+                      />
+                    </div>
+                    <div class="temperature-hint">
+                      <span>仅在“优先缩写”模式生效，默认 4。单表生成、批量生成、校验都会使用这个上限。</span>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          </el-card>
+            </el-card>
 
           <el-card class="config-card db-config-card" shadow="hover">
             <template #header>
@@ -573,6 +596,7 @@
               <el-table :data="parsedBatchTables" size="small" max-height="700" stripe>
                 <el-table-column type="index" label="序号" width="70" :index="(index) => index + 1" />
                 <el-table-column prop="layer" label="分层" width="100" />
+                <el-table-column prop="subjectDomain" label="主题域" width="120" />
                 <el-table-column prop="tableName" label="表名" width="260" />
                 <el-table-column prop="fieldCount" label="字段数量" width="100" />
                 <el-table-column prop="fields" label="字段明细" show-overflow-tooltip />
@@ -1157,7 +1181,8 @@ const llmConfig = reactive({
   apiKey: '',
   apiUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
   model: 'qwen3.5-122b-a10b',
-  temperature: 0.3
+  temperature: 0.3,
+  abbrMaxLen: 4
 })
 const testing = ref(false)
 const apiKeySaved = ref(false)
@@ -1350,12 +1375,13 @@ const loadConfigs = async () => {
     savedConfigs.value = JSON.parse(configs)
     if (savedConfigs.value.length > 0) {
       const defaultConfig = savedConfigs.value.find(c => c.isDefault) || savedConfigs.value[0]
-      selectedConfig.value = defaultConfig.name
-      llmConfig.apiUrl = defaultConfig.apiUrl
-      llmConfig.model = defaultConfig.model
-      llmConfig.temperature = defaultConfig.temperature !== undefined ? defaultConfig.temperature : 0.3
-      if (defaultConfig.apiKey) {
-        llmConfig.apiKey = decodeKey(defaultConfig.apiKey)
+        selectedConfig.value = defaultConfig.name
+        llmConfig.apiUrl = defaultConfig.apiUrl
+        llmConfig.model = defaultConfig.model
+        llmConfig.temperature = defaultConfig.temperature !== undefined ? defaultConfig.temperature : 0.3
+        llmConfig.abbrMaxLen = defaultConfig.abbrMaxLen !== undefined ? defaultConfig.abbrMaxLen : 4
+        if (defaultConfig.apiKey) {
+          llmConfig.apiKey = decodeKey(defaultConfig.apiKey)
         apiKeySaved.value = true
       } else {
         apiKeySaved.value = false
@@ -1430,14 +1456,15 @@ const saveConfig = () => {
   if (saveForm.isDefault) {
     savedConfigs.value.forEach(c => c.isDefault = false)
   }
-  const config = {
-    name: saveForm.name,
-    apiKey: encodeKey(llmConfig.apiKey),
-    apiUrl: llmConfig.apiUrl,
-    model: llmConfig.model,
-    temperature: llmConfig.temperature,
-    isDefault: saveForm.isDefault
-  }
+    const config = {
+      name: saveForm.name,
+      apiKey: encodeKey(llmConfig.apiKey),
+      apiUrl: llmConfig.apiUrl,
+      model: llmConfig.model,
+      temperature: llmConfig.temperature,
+      abbrMaxLen: llmConfig.abbrMaxLen,
+      isDefault: saveForm.isDefault
+    }
   const existingIndex = savedConfigs.value.findIndex(c => c.name === config.name)
   if (existingIndex >= 0) {
     savedConfigs.value[existingIndex] = config
@@ -1485,12 +1512,13 @@ watch(selectedConfig, (newVal) => {
         llmConfig.apiKey = ''
         apiKeySaved.value = false
       }
-      llmConfig.apiUrl = config.apiUrl
-      llmConfig.model = config.model
-      llmConfig.temperature = config.temperature !== undefined ? config.temperature : 0.3
+        llmConfig.apiUrl = config.apiUrl
+        llmConfig.model = config.model
+        llmConfig.temperature = config.temperature !== undefined ? config.temperature : 0.3
+        llmConfig.abbrMaxLen = config.abbrMaxLen !== undefined ? config.abbrMaxLen : 4
+      }
     }
-  }
-})
+  })
 
 const testConnection = async () => {
   if (!llmConfig.apiKey) {
@@ -1810,9 +1838,11 @@ const handleBatchFileChange = (file) => {
       console.log('解析到的数据:', jsonData)
       
       const tables = {}
+      const subjectDomainMap = {}
       for (const row of jsonData) {
         const tableName = row['表名']
         const layer = row['表分层'] || ''
+        const subjectDomain = row['主题域'] || ''
         const fieldName = row['字段名']
         const fieldType = row['推荐字段类型'] || 'VARCHAR(255)'
         
@@ -1824,16 +1854,29 @@ const handleBatchFileChange = (file) => {
             layer,
             fields: []
           }
+          subjectDomainMap[tableName] = new Set()
+        }
+        if (subjectDomain) {
+          subjectDomainMap[tableName].add(subjectDomain)
         }
         tables[tableName].fields.push({ name: fieldName, type: fieldType })
       }
       
-      parsedBatchTables.value = Object.values(tables).map(t => ({
-        tableName: t.tableName,
-        layer: t.layer,
-        fieldCount: t.fields.length,
-        fields: t.fields.map(f => `${f.name}(${f.type})`).join(', ')
-      }))
+      parsedBatchTables.value = Object.values(tables).map(t => {
+        const domains = subjectDomainMap[t.tableName] || new Set()
+        const domainList = [...domains]
+        let finalDomain = domainList.length > 0 ? domainList[0] : ''
+        if (domainList.length > 1) {
+          console.warn(`表[${t.tableName}]存在多个主题域值: ${domainList.join(', ')}，已取第一个`)
+        }
+        return {
+          tableName: t.tableName,
+          layer: t.layer,
+          subjectDomain: finalDomain,
+          fieldCount: t.fields.length,
+          fields: t.fields.map(f => `${f.name}(${f.type})`).join(', ')
+        }
+      })
       
       console.log('解析结果:', parsedBatchTables.value)
       ElMessage.success(`解析完成，共 ${parsedBatchTables.value.length} 张表`)
@@ -1898,9 +1941,10 @@ const startBatchGenerate = async () => {
   formData.append('cut_mode', batchCutMode.value)
   formData.append('enable_validation', batchEnableValidation.value)
   formData.append('max_workers', batchMaxWorkers.value)
-  formData.append('task_id', currentTaskId.value)
-  formData.append('custom_prompt', customPrompt.value)
-  formData.append('temperature', llmConfig.temperature)
+    formData.append('task_id', currentTaskId.value)
+    formData.append('custom_prompt', customPrompt.value)
+    formData.append('temperature', llmConfig.temperature)
+    formData.append('abbr_max_len', llmConfig.abbrMaxLen)
 
   try {
     const response = await axios.post('/api/batch-generate-ddl', formData, {
@@ -2726,12 +2770,13 @@ const generateDDL = async () => {
 
   try {
     const response = await axios.post('/api/generate-ddl', {
-      llm_config: {
-        api_key: llmConfig.apiKey,
-        api_url: llmConfig.apiUrl,
-        model: llmConfig.model,
-        temperature: llmConfig.temperature
-      },
+        llm_config: {
+          api_key: llmConfig.apiKey,
+          api_url: llmConfig.apiUrl,
+          model: llmConfig.model,
+          temperature: llmConfig.temperature,
+          abbr_max_len: llmConfig.abbrMaxLen
+        },
       word_roots_input: {
         type: 'text',
         content: ''
@@ -3049,6 +3094,12 @@ body {
   font-size: 12px;
   color: #909399;
   line-height: 1.6;
+}
+
+.config-divider {
+  height: 1px;
+  margin: 16px 0;
+  background: #dcdfe6;
 }
 
 .api-key-input {
@@ -3952,3 +4003,6 @@ body {
 }
 
 </style>
+
+
+

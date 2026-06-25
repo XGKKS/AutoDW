@@ -2,15 +2,28 @@ import re
 import jieba
 from typing import List, Dict, Tuple, Optional
 from .ddl_validator import DDLValidator
-from app.root_policy import get_root_constraints, get_root_reuse_principle, normalize_priority
+from app.root_policy import (
+    DEFAULT_ABBR_MAX_LEN,
+    get_root_constraints,
+    get_root_reuse_principle,
+    normalize_priority,
+    resolve_abbr_max_len,
+)
 
 
 class UnifiedValidator:
-    def __init__(self, word_roots: List[Dict], standards: Dict = None, root_match_priority: str = 'full'):
+    def __init__(
+        self,
+        word_roots: List[Dict],
+        standards: Dict = None,
+        root_match_priority: str = 'full',
+        abbr_max_len: int = DEFAULT_ABBR_MAX_LEN,
+    ):
         self.word_roots = word_roots
         self.standards = standards or {}
         self.root_match_priority = root_match_priority
-        self.ddl_validator = DDLValidator(word_roots, standards, root_match_priority)
+        self.abbr_max_len = resolve_abbr_max_len(abbr_max_len)
+        self.ddl_validator = DDLValidator(word_roots, standards, root_match_priority, self.abbr_max_len)
         
         self.root_set = set()
         self.chinese_to_roots = {}
@@ -40,8 +53,8 @@ class UnifiedValidator:
 
     def get_root_mode_prompt_block(self) -> str:
         return "\n".join([
-            get_root_constraints(self.root_match_priority),
-            get_root_reuse_principle(self.root_match_priority),
+            get_root_constraints(self.root_match_priority, self.abbr_max_len),
+            get_root_reuse_principle(self.root_match_priority, self.abbr_max_len),
             self.ddl_validator.get_root_mode_fix_requirements()
         ])
 

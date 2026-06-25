@@ -47,10 +47,12 @@ from app.native_db_executor import execute_native_ddl, test_native_connection
 from app.validators.ddl_validator import DDLValidator
 from app.config.db_examples import get_db_example
 from app.root_policy import (
+    DEFAULT_ABBR_MAX_LEN,
     get_root_constraints,
     get_root_reuse_principle,
     infer_theme_prefix,
     render_theme_prefix_guide,
+    resolve_abbr_max_len,
 )
 
 app = FastAPI(title="数仓建表 AI 助手")
@@ -320,11 +322,11 @@ DEFAULT_STANDARDS_CONTENT = """## 数仓开发规范（内置默认规范）
 #### 规则3：词根形式服从前台模式
 - 词根库同时维护 `full_root` 和 `abbr_root`，但实际建表只能使用当前请求选择的模式。
 - 当前为“优先全称”时，只能使用 `full_root`，不得混用 `abbr_root`。
-- 当前为“优先缩写”时，只能使用 `abbr_root`，且每个缩写词根最多 4 个字母。
+- 当前为“优先缩写”时，只能使用 `abbr_root`，且每个缩写词根长度不得超过当前配置的上限。
 - 未命中词根库的新概念，也必须按当前模式生成命名用词根。
 
 #### 规则4：词根库维护
-- `full_root` 使用完整英文词根，`abbr_root` 使用不超过 4 个字母的缩写词根。
+- `full_root` 使用完整英文词根，`abbr_root` 使用不超过当前配置上限的缩写词根。
 - 不在规范中指定业务词根映射，实际映射以用户词根库为准。
 
 ### 二、标准字段原则
@@ -375,7 +377,7 @@ DEFAULT_STANDARDS_CONTENT = """## 数仓开发规范（内置默认规范）
 - 避免过度索引影响写入性能
 - 复合索引遵循最左前缀原则"""
 
-USER_PROMPT_TEMPLATE = """你是一位数据仓库专家。请根据以下参考信息生成 DDL：
+USER_PROMPT_TEMPLATE = """你是一位数据仓库专家。请根据以下参考信息生成 DDL，不要有思考和任何解释过程：
 
 【建表需求】
 {description}
@@ -403,7 +405,7 @@ USER_PROMPT_TEMPLATE = """你是一位数据仓库专家。请根据以下参考
 8. 【新词根扩展】如果已保存的词根中检索不到要建表的字段，请按当前词根模式生成命名用词根，并在 SQL 输出结束后，单独一行按以下格式补全词根库信息：【新词根】词根全称(例如：create_time):词根缩写(例如：crt_tm):中文名称:推荐字段类型"""
 
 TABLE_NAME_PROMPT = """
-【任务】根据以下信息生成符合规范的英文表名
+【任务】根据以下信息生成符合规范的英文表名，不要有思考和任何解释过程
 
 【中文表名】{chinese_table_name}
 
@@ -458,13 +460,13 @@ def get_system_prompt() -> str:
     content = standards.get('content', '')
     
     if not content:
-        system_prompt_cache = "你是一位数据仓库专家，请根据用户的建表需求生成符合规范的DDL语句。"
+        system_prompt_cache = "你是一位数据仓库专家，请根据用户的建表需求生成符合规范的DDL语句，不要有思考和任何解释过程。"
     else:
         system_prompt_cache = f"""你是一位数据仓库专家，必须严格遵循以下开发规范：
 
 {content}
 
-请根据用户的建表需求，使用规范中的词根和命名规则生成正确的DDL语句。"""
+请根据用户的建表需求，使用规范中的词根和命名规则生成正确的DDL语句，不要有思考和任何解释过程。"""
     
     logger.info(f"System Prompt缓存已初始化，长度: {len(system_prompt_cache)}")
     return system_prompt_cache
@@ -473,6 +475,27 @@ def refresh_system_prompt_cache():
     global system_prompt_cache
     system_prompt_cache = None
     logger.info("System Prompt缓存已刷新")
+
+
+def load_legacy_default_standard() -> dict:
+    legacy_default_path = os.path.join(STANDARDS_DIR, "default.json")
+    if not os.path.exists(legacy_default_path):
+        return {}
+
+    try:
+        with open(legacy_default_path, 'r', encoding='utf-8-sig') as f:
+            data = json.load(f)
+        content = (data.get('content') or '').strip()
+        if not content:
+            return {}
+        return {
+            "content": content,
+            "updated_at": data.get('last_modified', ''),
+            "name": data.get('name', '') or "默认规范"
+        }
+    except Exception as e:
+        logger.error(f"读取历史默认规范失败: {e}")
+        return {}
 
 
 def load_all_standards() -> list:
@@ -494,6 +517,8 @@ def load_all_standards() -> list:
                 with open(filepath, 'r', encoding='utf-8-sig') as f:
                     data = json.load(f)
                     standard_id = filename.replace('.json', '')
+                    if standard_id == "default":
+                        continue
                     is_active = data.get('is_active', False)
                     if is_active:
                         has_active_custom = True
@@ -508,19 +533,29 @@ def load_all_standards() -> list:
         logger.error(f"加载规范列表失败: {e}")
     
     # 加载默认规范，设置正确的激活状态
+    legacy_default = load_legacy_default_standard()
     if os.path.exists(STANDARDS_FILE):
         try:
             with open(STANDARDS_FILE, 'r', encoding='utf-8-sig') as f:
                 data = json.load(f)
                 content = data.get('content', '').strip()
                 if not content:
-                    standards.append({
-                        "id": "default",
-                        "name": "默认规范（内置）",
-                        "content": DEFAULT_STANDARDS_CONTENT,
-                        "updated_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                        "is_active": not has_active_custom  # 如果没有自定义规范激活，则默认规范激活
-                    })
+                    if legacy_default:
+                        standards.append({
+                            "id": "default",
+                            "name": "默认规范",
+                            "content": legacy_default["content"],
+                            "updated_at": legacy_default["updated_at"],
+                            "is_active": not has_active_custom
+                        })
+                    else:
+                        standards.append({
+                            "id": "default",
+                            "name": "默认规范（内置）",
+                            "content": DEFAULT_STANDARDS_CONTENT,
+                            "updated_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                            "is_active": not has_active_custom  # 如果没有自定义规范激活，则默认规范激活
+                        })
                 else:
                     standards.append({
                         "id": "default",
@@ -531,6 +566,32 @@ def load_all_standards() -> list:
                     })
         except Exception as e:
             logger.error(f"加载旧版规范文件失败: {e}")
+            if legacy_default:
+                standards.append({
+                    "id": "default",
+                    "name": "默认规范",
+                    "content": legacy_default["content"],
+                    "updated_at": legacy_default["updated_at"],
+                    "is_active": not has_active_custom
+                })
+            else:
+                standards.append({
+                    "id": "default",
+                    "name": "默认规范（内置）",
+                    "content": DEFAULT_STANDARDS_CONTENT,
+                    "updated_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    "is_active": not has_active_custom
+                })
+    else:
+        if legacy_default:
+            standards.append({
+                "id": "default",
+                "name": "默认规范",
+                "content": legacy_default["content"],
+                "updated_at": legacy_default["updated_at"],
+                "is_active": not has_active_custom
+            })
+        else:
             standards.append({
                 "id": "default",
                 "name": "默认规范（内置）",
@@ -538,14 +599,6 @@ def load_all_standards() -> list:
                 "updated_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 "is_active": not has_active_custom
             })
-    else:
-        standards.append({
-            "id": "default",
-            "name": "默认规范（内置）",
-            "content": DEFAULT_STANDARDS_CONTENT,
-            "updated_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            "is_active": not has_active_custom
-        })
     
     # 添加自定义规范
     standards.extend(custom_standards)
@@ -557,6 +610,22 @@ def load_all_standards() -> list:
 
 def save_standard_by_id(standard_id: str, content: str, name: str = None, is_active: bool = False):
     logger.info(f"保存规范: {standard_id}")
+
+    if standard_id == "default":
+        try:
+            data = {
+                "version": "1.0",
+                "last_modified": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                "content": content
+            }
+            with open(STANDARDS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            logger.info("默认规范保存成功")
+            refresh_system_prompt_cache()
+            return True
+        except Exception as e:
+            logger.error(f"保存默认规范失败: {e}")
+            return False
     
     if not os.path.exists(STANDARDS_DIR):
         os.makedirs(STANDARDS_DIR, exist_ok=True)
@@ -617,6 +686,8 @@ def load_standards() -> dict:
             for filename in os.listdir(STANDARDS_DIR):
                 if not filename.endswith('.json'):
                     continue
+                if filename == 'default.json':
+                    continue
                 filepath = os.path.join(STANDARDS_DIR, filename)
                 with open(filepath, 'r', encoding='utf-8-sig') as f:
                     active_data = json.load(f)
@@ -638,6 +709,14 @@ def load_standards() -> dict:
                 data = json.load(f)
                 content = data.get('content', '').strip()
                 if not content:
+                    legacy_default = load_legacy_default_standard()
+                    if legacy_default:
+                        logger.info("主规范为空，使用历史默认规范内容")
+                        return {
+                            "version": "1.0",
+                            "last_modified": legacy_default.get('updated_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+                            "content": legacy_default["content"]
+                        }
                     logger.info("规范文件内容为空，尝试从内置默认文件初始化")
                     builtin_content = seed_from_builtin(BUILTIN_STANDARDS_FILE, STANDARDS_FILE, "standards")
                     if builtin_content:
@@ -651,6 +730,14 @@ def load_standards() -> dict:
         except Exception as e:
             logger.error(f"加载规范文件失败: {e}")
     logger.info("规范文件不存在，尝试从内置默认文件初始化")
+    legacy_default = load_legacy_default_standard()
+    if legacy_default:
+        logger.info("主规范文件不存在，使用历史默认规范内容")
+        return {
+            "version": "1.0",
+            "last_modified": legacy_default.get('updated_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+            "content": legacy_default["content"]
+        }
     builtin_content = seed_from_builtin(BUILTIN_STANDARDS_FILE, STANDARDS_FILE, "standards")
     if builtin_content:
         return {"version": "1.0", "last_modified": datetime.now().strftime('%Y-%m-%d'), "content": builtin_content}
@@ -1338,7 +1425,7 @@ def extract_llm_content(result: dict) -> str:
         return fallback_text
     reasoning = str(message.get("reasoning_content") or "").strip()
     if reasoning:
-        logger.warning("LLM returned reasoning_content but no final content; reasoning was ignored")
+        logger.warning("LLM returned reasoning_content but no final content; treating response as empty")
     return ""
 
 def build_llm_url(api_url: str) -> str:
@@ -1348,6 +1435,21 @@ def build_llm_url(api_url: str) -> str:
         return api_url
     return f"{api_url}/chat/completions"
 
+
+
+
+def is_deepseek_native_api(api_url: str) -> bool:
+    normalized = (api_url or '').strip().rstrip('/').lower()
+    if normalized.endswith('/chat/completions'):
+        normalized = normalized[:-len('/chat/completions')].rstrip('/')
+    return normalized == 'https://api.deepseek.com'
+
+
+def add_deepseek_thinking_body(api_url: str, payload: dict) -> dict:
+    """OpenAI SDK extra_body maps to top-level JSON fields for raw HTTP calls."""
+    if is_deepseek_native_api(api_url):
+        payload['thinking'] = {'type': 'disabled'}
+    return payload
 
 
 def extract_create_table_content(response_content: str) -> str:
@@ -1511,6 +1613,7 @@ async def test_connection(req: TestConnectionRequest):
             "max_tokens": 10
         }
 
+        data = add_deepseek_thinking_body(req.api_url, data)
         response = requests_session.post(
             build_llm_url(req.api_url),
             headers=headers,
@@ -1534,6 +1637,7 @@ async def test_connection(req: TestConnectionRequest):
 @app.post("/api/generate-ddl", response_model=GenerateDDLResponse)
 async def generate_ddl(req: GenerateDDLRequest):
     total_start_time = datetime.now()
+    abbr_max_len = resolve_abbr_max_len(req.llm_config.abbr_max_len)
     
     logger.info("="*50)
     logger.info("开始生成DDL请求")
@@ -1576,8 +1680,8 @@ async def generate_ddl(req: GenerateDDLRequest):
     db_example_config = get_db_example(req.db_type, req.root_match_priority)
     db_example = f"表名格式: {db_example_config['table_format']}\n\n示例DDL:\n{db_example_config['example']}"
     
-    root_constraints = get_root_constraints(req.root_match_priority)
-    root_reuse_principle = get_root_reuse_principle(req.root_match_priority)
+    root_constraints = get_root_constraints(req.root_match_priority, abbr_max_len)
+    root_reuse_principle = get_root_reuse_principle(req.root_match_priority, abbr_max_len)
     theme_prefix = infer_theme_prefix(req.description, req.db_type, standards_content=standards_content)
     if theme_prefix:
         theme_prefix_block = (
@@ -1654,6 +1758,7 @@ async def generate_ddl(req: GenerateDDLRequest):
         "temperature": req.llm_config.temperature
     }
     
+    data = add_deepseek_thinking_body(req.llm_config.api_url, data)
     max_retries = 3
     retry_delay = 5
     response_content = None
@@ -1727,7 +1832,8 @@ async def generate_ddl(req: GenerateDDLRequest):
                 validator = DDLValidator(
                     word_roots=load_word_roots(),
                     standards=load_standards(),
-                    root_match_priority=req.root_match_priority
+                    root_match_priority=req.root_match_priority,
+                    abbr_max_len=abbr_max_len,
                 )
                 violations = validator.validate(content, req.db_type)
                 
@@ -1761,6 +1867,7 @@ async def generate_ddl(req: GenerateDDLRequest):
                                 "temperature": req.llm_config.temperature
                             }
                             
+                            data = add_deepseek_thinking_body(req.llm_config.api_url, data)
                             response = requests_session.post(
                                 build_llm_url(req.llm_config.api_url),
                                 headers=headers,
@@ -2307,7 +2414,16 @@ def generate_table_semantic_description(table_name: str, table_info: dict) -> st
     
     return "\n".join(semantic_parts)
 
-def generate_single_table_ddl(table_name: str, table_info: dict, word_roots: list, db_type: str, root_priority: str, custom_prompt: str = "", semantic_description: str = "") -> str:
+def generate_single_table_ddl(
+    table_name: str,
+    table_info: dict,
+    word_roots: list,
+    db_type: str,
+    root_priority: str,
+    custom_prompt: str = "",
+    semantic_description: str = "",
+    abbr_max_len: int = DEFAULT_ABBR_MAX_LEN,
+) -> str:
     fields_text = []
     for field in table_info['fields']:
         fields_text.append(f"- {field['name']} ({field['type']})")
@@ -2328,8 +2444,8 @@ def generate_single_table_ddl(table_name: str, table_info: dict, word_roots: lis
     db_example_config = get_db_example(db_type_lower, root_priority)
     db_example = f"表名格式: {db_example_config['table_format']}\n\n示例DDL:\n{db_example_config['example']}"
     
-    root_constraints = get_root_constraints(root_priority)
-    root_reuse_principle = get_root_reuse_principle(root_priority)
+    root_constraints = get_root_constraints(root_priority, abbr_max_len)
+    root_reuse_principle = get_root_reuse_principle(root_priority, abbr_max_len)
     theme_prefix = user_subject_domain or infer_theme_prefix(description, table_name, layer, standards_content=standards_content)
     layer_prefix = f"{layer}_" if layer else ""
     if theme_prefix:
@@ -2369,7 +2485,7 @@ def generate_single_table_ddl(table_name: str, table_info: dict, word_roots: lis
             prompt = f"{custom_prompt}\n\n【建表需求】\n{description}\n\n【数据库类型】\n{db_type}\n{db_example}\n\n【词根参考】\n{format_word_roots_for_prompt(word_roots, root_priority)}"
         prompt = append_root_mode_constraints(prompt, root_constraints, root_reuse_principle)
     else:
-        prompt = f"""你是一位数据仓库专家。请根据以下参考信息生成 DDL：
+        prompt = f"""你是一位数据仓库专家。请根据以下参考信息生成 DDL，不要任何解释和任何思考过程：
 
 【建表需求】
 {description}
@@ -2409,7 +2525,8 @@ def process_single_table_for_batch(
     model: str,
     custom_prompt: str = "",
     semantic_description: str = "",
-    temperature: float = 0.3
+    temperature: float = 0.3,
+    abbr_max_len: int = DEFAULT_ABBR_MAX_LEN,
 ) -> Tuple[str, str, list]:
     """
     处理单张表的DDL生成（线程安全）
@@ -2424,7 +2541,8 @@ def process_single_table_for_batch(
             db_type_name,
             root_match_priority,
             custom_prompt,
-            semantic_description
+            semantic_description,
+            abbr_max_len,
         )
         
         system_prompt = get_system_prompt()
@@ -2446,6 +2564,7 @@ def process_single_table_for_batch(
             "temperature": temperature
         }
         
+        data = add_deepseek_thinking_body(api_url, data)
         response_content = None
         max_retries = 3
         retry_delay = 5
@@ -2517,7 +2636,7 @@ def process_single_table_for_batch(
         return table_name, f"-- 生成失败: {str(e)}", []
 
 
-def process_batch_task(task_id: str, content: bytes, api_key: str, api_url: str, model: str, db_type: str, root_match_priority: str, custom_prompt: str = "", enable_validation: bool = True, max_workers: int = 5, temperature: float = 0.3, cut_mode: str = "accurate", use_field_level: bool = True):
+def process_batch_task(task_id: str, content: bytes, api_key: str, api_url: str, model: str, db_type: str, root_match_priority: str, custom_prompt: str = "", enable_validation: bool = True, max_workers: int = 5, temperature: float = 0.3, cut_mode: str = "accurate", abbr_max_len: int = DEFAULT_ABBR_MAX_LEN, use_field_level: bool = True):
     """异步处理批量建表任务（多线程并发版）
     
     Args:
@@ -2528,6 +2647,7 @@ def process_batch_task(task_id: str, content: bytes, api_key: str, api_url: str,
         use_field_level: 是否使用字段级处理流程（推荐），默认启用
     """
     start_time = datetime.now()
+    abbr_max_len = resolve_abbr_max_len(abbr_max_len)
     
     # 加载开发规范（用于表名生成）
     standards = load_standards()
@@ -2609,8 +2729,6 @@ def process_batch_task(task_id: str, content: bytes, api_key: str, api_url: str,
         try:
             from app.processors.field_processor import FieldProcessor
             
-            # 使用完整的历史词根库进行匹配，而不是筛选后的词根
-            # 筛选后的词根只用于给LLM作为参考示例
             all_history_roots_for_matching = load_word_roots()
             logger.info(f"【字段级处理】使用完整历史词根库进行匹配，共 {len(all_history_roots_for_matching)} 条词根")
             logger.info(f"【字段级处理】筛选后的词根（用于LLM参考）: {len(filtered_roots)} 条")
@@ -2622,7 +2740,8 @@ def process_batch_task(task_id: str, content: bytes, api_key: str, api_url: str,
                                             word_roots=all_history_roots_for_matching,
                                             root_match_priority=root_match_priority,
                                             cut_mode=cut_mode,
-                                            standards=standards_content)
+                                            standards=standards_content,
+                                            abbr_max_len=abbr_max_len)
             tables_data, field_mapping, field_stats, root_translations = field_processor.build_field_mapping(content)
             
             logger.info(f"字段映射构建完成，共 {len(field_mapping)} 个字段映射")
@@ -2634,35 +2753,20 @@ def process_batch_task(task_id: str, content: bytes, api_key: str, api_url: str,
                 for table_name, ddl_content in results.items()
                 if isinstance(ddl_content, str) and ddl_content.startswith("-- 生成失败")
             ]
-            field_level_success_count = len(results) - len(field_level_errors)
-
             if field_level_errors:
                 errors.extend(field_level_errors)
-                logger.warning(
-                    f"字段级处理有 {len(field_level_errors)} 张表生成失败，成功 {field_level_success_count} 张"
-                )
-
-            if field_level_success_count == 0:
-                logger.warning("字段级处理未生成任何有效DDL，回退到表级处理")
-                results = {}
-                errors = []
-                all_new_roots = []
-                raise RuntimeError("字段级处理未生成任何有效DDL")
+                raise RuntimeError("字段级主流程生成DDL失败: " + "; ".join(field_level_errors))
             
-            # 收集新词根（只收集不在历史词根库中的）
-            # 注意：必须使用完整的历史词根库，而不是筛选后的词根
             all_history_roots = load_word_roots()
             existing_chinese = {r.get('chinese_name', '') for r in all_history_roots}
             
             all_new_roots = []
-            # 使用词根翻译结果来提取新词根，而不是完整字段名
             for chinese_root, english_root in root_translations.items():
-                # 只添加不在历史词根库中的新词根
                 if chinese_root not in existing_chinese:
                     all_new_roots.append({
                         'chinese_name': chinese_root,
                         'full_root': english_root,
-                        'abbr_root': english_root[:4] if len(english_root) > 4 else english_root,
+                        'abbr_root': english_root[:abbr_max_len] if len(english_root) > abbr_max_len else english_root,
                         'category': 'root',
                         'recommended_type': 'VARCHAR(255)',
                         'business_domain': '基础通用'
@@ -2671,7 +2775,6 @@ def process_batch_task(task_id: str, content: bytes, api_key: str, api_url: str,
             logger.info(f"字段级处理完成，生成 {len(results)} 张表的DDL")
             logger.info(f"字段级处理提取到 {len(all_new_roots)} 个新词根")
             
-            # 更新进度为完成状态
             completed_field_progress = None
             if field_stats:
                 completed_field_progress = {
@@ -2696,7 +2799,6 @@ def process_batch_task(task_id: str, content: bytes, api_key: str, api_url: str,
                 field_progress=completed_field_progress
             )
             
-            # 更新缓存，供前端轮询获取新词根
             with cache_lock:
                 batch_cache[task_id] = {
                     'table_names': table_names,
@@ -2710,90 +2812,23 @@ def process_batch_task(task_id: str, content: bytes, api_key: str, api_url: str,
             
             field_level_completed = True
         except Exception as e:
-            logger.error(f"字段级处理失败，回退到表级处理: {e}")
-    
-    if not field_level_completed:
-        if content is not None:
-            with cache_lock:
-                if task_id in batch_cache:
-                    logger.info(f"新上传文件，清除旧缓存，从头开始处理")
-                    del batch_cache[task_id]
-                update_progress(task_id, 0, total_tables)
-                batch_cache[task_id] = {
-                    'table_names': table_names,
-                    'tables_data': tables,
-                    'results': {},
-                    'errors': [],
-                    'next_index': 0,
-                    'db_type': db_type,
-                    'root_match_priority': root_match_priority
-                }
-    
-        max_threads = max(1, min(max_workers, 10, total_tables))
-        logger.info(f"使用并发线程数: {max_threads}")
-        
-        with ThreadPoolExecutor(max_workers=max_threads) as thread_executor:
-            futures = {}
-            
-            for table_name in table_names:
-                future = thread_executor.submit(
-                    process_single_table_for_batch,
-                    table_name,
-                    tables[table_name],
-                    filtered_roots,
-                    db_type_name,
-                    root_match_priority,
-                    api_key,
-                    api_url,
-                    model,
-                    custom_prompt,
-                    table_semantic_descriptions.get(table_name, ""),
-                    temperature
-                )
-                futures[future] = table_name
-            
-            completed_count = 0
-            
-            for future in as_completed(futures):
-                if task_cancel_flags.get(task_id, False):
-                    logger.info(f"任务 {task_id} 已被终止")
-                    break
-                
-                table_name = futures[future]
-                completed_count += 1
-                
-                with cache_lock:
-                    update_progress(task_id, completed_count, total_tables, table_name)
-                
-                try:
-                    _, ddl_content, new_roots = future.result()
-                    
-                    logger.info(f"表 {table_name} DDL生成完成")
-                    
-                    if ddl_content.startswith("-- 生成失败"):
-                        errors.append(f"{table_name}: {ddl_content[6:].strip()}")
-                    
-                    results[table_name] = ddl_content
-                    
-                    if new_roots:
-                        all_new_roots.extend(new_roots)
-                        logger.info(f"表 {table_name} 提取到 {len(new_roots)} 个新词根")
-                
-                except Exception as e:
-                    logger.error(f"获取表 {table_name} 结果时出错: {e}")
-                    errors.append(f"{table_name}: {str(e)}")
-                    results[table_name] = f"-- 生成失败: {str(e)}"
-                
-                with cache_lock:
-                    batch_cache[task_id] = {
-                        'table_names': table_names,
-                        'results': results.copy(),
-                        'errors': errors.copy(),
-                        'next_index': completed_count,
-                        'db_type': db_type,
-                        'root_match_priority': root_match_priority,
-                        'new_roots': all_new_roots.copy()
-                    }
+            logger.error(f"字段级处理失败，终止批量任务: {e}")
+            elapsed_time = (datetime.now() - start_time).total_seconds()
+            task_results[task_id] = {
+                "code": 1,
+                "message": f"字段级主流程失败: {str(e)}",
+                "elapsed_time": elapsed_time,
+                "errors": errors.copy()
+            }
+            return
+    elif use_field_level:
+        elapsed_time = (datetime.now() - start_time).total_seconds()
+        task_results[task_id] = {
+            "code": 1,
+            "message": "字段级主流程仅支持Excel上传场景，当前任务缺少原始文件内容",
+            "elapsed_time": elapsed_time
+        }
+        return
     
     deduplicated_new_roots = []
     seen_chinese_names = set()
@@ -2828,7 +2863,8 @@ def process_batch_task(task_id: str, content: bytes, api_key: str, api_url: str,
             unified_validator = UnifiedValidator(
                 word_roots=load_word_roots(),
                 standards=load_standards(),
-                root_match_priority=root_match_priority
+                root_match_priority=root_match_priority,
+                abbr_max_len=abbr_max_len,
             )
             validation_result = unified_validator.validate_batch(valid_results)
             
@@ -2870,6 +2906,7 @@ def process_batch_task(task_id: str, content: bytes, api_key: str, api_url: str,
                             "temperature": temperature
                         }
                         
+                        fix_data = add_deepseek_thinking_body(api_url, fix_data)
                         fix_response = requests_session.post(
                             build_llm_url(api_url),
                             headers=headers,
@@ -2982,9 +3019,11 @@ async def batch_generate_ddl(
     enable_validation: bool = Form(True),
     max_workers: int = Form(5),
     temperature: float = Form(0.3),
-    cut_mode: str = Form("accurate")
+    cut_mode: str = Form("accurate"),
+    abbr_max_len: int = Form(DEFAULT_ABBR_MAX_LEN),
 ):
-    logger.info(f"批量生成DDL请求 - 文件: {file.filename}, 数据库类型: {db_type}, 任务ID: {task_id}, 自定义提示词: {'是' if custom_prompt else '否'}, 三层校验: {'启用' if enable_validation else '禁用'}, 并发线程数: {max_workers}, 温度: {temperature}, 分词模式: {cut_mode}")
+    abbr_max_len = resolve_abbr_max_len(abbr_max_len)
+    logger.info(f"批量生成DDL请求 - 文件: {file.filename}, 数据库类型: {db_type}, 任务ID: {task_id}, 自定义提示词: {'是' if custom_prompt else '否'}, 三层校验: {'启用' if enable_validation else '禁用'}, 并发线程数: {max_workers}, 温度: {temperature}, 分词模式: {cut_mode}, 缩写上限: {abbr_max_len}")
     
     if not task_id:
         return {"code": 1, "message": "缺少任务ID"}
@@ -2996,9 +3035,9 @@ async def batch_generate_ddl(
     
     content = await file.read()
     
-    asyncio.get_event_loop().run_in_executor(executor, process_batch_task, task_id, content, api_key, api_url, model, db_type, root_match_priority, custom_prompt, enable_validation, max_workers, temperature, cut_mode)
-    
-    return {"code": 0, "message": "任务已启动", "data": {"task_id": task_id, "enable_validation": enable_validation, "max_workers": max_workers}}
+    asyncio.get_event_loop().run_in_executor(executor, process_batch_task, task_id, content, api_key, api_url, model, db_type, root_match_priority, custom_prompt, enable_validation, max_workers, temperature, cut_mode, abbr_max_len)
+
+    return {"code": 0, "message": "任务已启动", "data": {"task_id": task_id, "enable_validation": enable_validation, "max_workers": max_workers, "abbr_max_len": abbr_max_len}}
 
 
 @app.get("/api/batch-result/{task_id}")
@@ -3278,6 +3317,7 @@ else:
     logger.warning(f"  期望路径: {frontend_dir}")
     logger.warning("  请确保 frontend 目录与可执行文件在同一目录下")
     logger.warning("=" * 60)
+
 
 
 
