@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Literal, List, Optional
 
 
@@ -7,6 +7,7 @@ class LLMConfig(BaseModel):
     api_url: str
     model: str
     temperature: Optional[float] = 0.3
+    abbr_max_len: int = Field(default=4, ge=1, le=12)
 
 
 class TextInput(BaseModel):

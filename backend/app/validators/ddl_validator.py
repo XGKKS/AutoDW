@@ -2,10 +2,12 @@ import re
 from typing import List, Dict, Tuple, Optional
 from app.root_policy import (
     build_root_sets,
+    DEFAULT_ABBR_MAX_LEN,
     get_root_constraints,
     get_root_reuse_principle,
     get_theme_prefix_map,
     normalize_priority,
+    resolve_abbr_max_len,
     table_business_domain_errors,
     validate_identifier_mode,
 )
@@ -33,10 +35,17 @@ class DDLValidator:
     TYPE_SUFFIXES = ['type', '_type', 'tp', '_tp']
     FLAG_SUFFIXES = ['flag', '_flag', 'flg', '_flg']
 
-    def __init__(self, word_roots: List[Dict], standards: Dict = None, root_match_priority: str = 'full'):
+    def __init__(
+        self,
+        word_roots: List[Dict],
+        standards: Dict = None,
+        root_match_priority: str = 'full',
+        abbr_max_len: int = DEFAULT_ABBR_MAX_LEN,
+    ):
         self.word_roots = word_roots
         self.standards = standards or {}
         self.root_match_priority = root_match_priority
+        self.abbr_max_len = resolve_abbr_max_len(abbr_max_len)
         
         self.root_set = set()
         self.full_root_set, self.abbr_root_set, self.abbr_to_full_roots = build_root_sets(word_roots)
@@ -205,7 +214,8 @@ class DDLValidator:
             self.root_match_priority,
             self.full_root_set,
             self.abbr_root_set,
-            self.abbr_to_full_roots
+            self.abbr_to_full_roots,
+            self.abbr_max_len,
         ):
             violations.append({
                 'rule': '规则2: 词根模式检查',
@@ -218,16 +228,16 @@ class DDLValidator:
 
     def get_available_roots_for_mode(self) -> List[str]:
         if normalize_priority(self.root_match_priority) == 'abbr':
-            return sorted(root for root in self.abbr_root_set if len(root) <= 4)
+            return sorted(root for root in self.abbr_root_set if len(root) <= self.abbr_max_len)
         return sorted(self.full_root_set)
 
     def get_root_mode_fix_requirements(self) -> str:
         if normalize_priority(self.root_match_priority) == 'abbr':
             return (
                 "【词根模式修正要求】\n"
-                "1. 当前为缩写模式，只能修正为词根库中的 abbr_root 或新的 <=4 字母缩写词根\n"
-                "2. 字段名和表名主体中的每个词根都不能超过 4 个字母\n"
-                "3. 不允许输出 full_root、完整英文单词或超过 4 个字母的词根"
+                f"1. 当前为缩写模式，只能修正为词根库中的 abbr_root 或新的 <={self.abbr_max_len} 字母缩写词根\n"
+                f"2. 字段名和表名主体中的每个词根都不能超过 {self.abbr_max_len} 个字母\n"
+                f"3. 不允许输出 full_root、完整英文单词或超过 {self.abbr_max_len} 个字母的词根"
             )
         return (
             "【词根模式修正要求】\n"
@@ -437,8 +447,8 @@ class DDLValidator:
         warning_list = "\n".join([f"- {v['message']}" for v in violations if v['level'] == 'warning'])
         
         available_roots = ", ".join(self.get_available_roots_for_mode())
-        root_constraints = get_root_constraints(self.root_match_priority)
-        root_reuse_principle = get_root_reuse_principle(self.root_match_priority)
+        root_constraints = get_root_constraints(self.root_match_priority, self.abbr_max_len)
+        root_reuse_principle = get_root_reuse_principle(self.root_match_priority, self.abbr_max_len)
         root_mode_fix_requirements = self.get_root_mode_fix_requirements()
         
         prompt = f"""请修正以下DDL的规范违规问题（第{attempt}轮修正）：
