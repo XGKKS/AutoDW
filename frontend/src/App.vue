@@ -24,19 +24,11 @@
         </div>
         <div
           class="nav-item"
-          :class="{ active: activeMenu === 'ddl' }"
-          @click="activeMenu = 'ddl'"
-        >
-          <span class="nav-icon">⚡</span>
-          <span class="nav-text">单一建表</span>
-        </div>
-        <div
-          class="nav-item"
           :class="{ active: activeMenu === 'batch' }"
           @click="activeMenu = 'batch'"
         >
-          <span class="nav-icon">📦</span>
-          <span class="nav-text">批量建表</span>
+          <span class="nav-icon">⚡</span>
+          <span class="nav-text">建表生成</span>
         </div>
         <div
           class="nav-item"
@@ -46,13 +38,21 @@
           <span class="nav-icon">📜</span>
           <span class="nav-text">建表历史</span>
         </div>
+        <div
+          class="nav-item"
+          :class="{ active: activeMenu === 'governance' }"
+          @click="activeMenu = 'governance'"
+        >
+          <span class="nav-icon">&#x1F4CA;</span>
+          <span class="nav-text">词根治理</span>
+        </div>
       </nav>
     </aside>
 
     <div class="main-container">
       <header class="header">
         <div class="header-title">
-          {{ activeMenu === 'config' ? '基础配置' : (activeMenu === 'standards' ? '开发规范管理' : (activeMenu === 'batch' ? '批量建表' : (activeMenu === 'history' ? '建表历史' : '单一建表'))) }}
+          {{ activeMenu === 'config' ? '基础配置' : (activeMenu === 'standards' ? '开发规范管理' : (activeMenu === 'governance' ? '词根治理' : (activeMenu === 'batch' ? '建表生成' : (activeMenu === 'history' ? '建表历史' : '单一建表')))) }}
         </div>
         <div class="header-actions">
           <el-button circle @click="showSettings = true">
@@ -112,6 +112,14 @@
                       v-model="llmConfig.model"
                       placeholder="请输入模型名称"
                       size="large"
+                    />
+                  </el-form-item>
+                  <el-form-item label="行业背景">
+                    <el-input
+                      v-model="llmConfig.industryContext"
+                      type="textarea"
+                      :rows="4"
+                      placeholder="请输入当前项目所属行业背景，例如：保险、零售、电商、制造、医疗等，并补充核心业务术语或场景"
                     />
                   </el-form-item>
                   <el-form-item>
@@ -213,62 +221,6 @@
             <el-empty v-if="dbConnections.length === 0" description="暂无数据库连接配置" />
           </el-card>
 
-          <div class="input-row">
-            <el-card class="input-card" shadow="hover">
-              <template #header>
-                <div class="card-header">
-                  <span class="card-title">📝 词根输入</span>
-                  <el-tag type="info" size="small">支持批量导入</el-tag>
-                </div>
-              </template>
-              <el-tabs v-model="wordRootsTab" class="custom-tabs">
-                <el-tab-pane label="粘贴文本" name="text">
-                  <el-input
-                    v-model="wordRootsText"
-                    type="textarea"
-                    :rows="6"
-                    placeholder="每行格式：中文含义:英文词根:缩写:类型
-示例：用户:user:usr:VARCHAR(32)"
-                  />
-                </el-tab-pane>
-                <el-tab-pane label="上传文件" name="file">
-                  <div class="upload-section">
-                    <el-upload
-                      ref="wordRootsUpload"
-                      :auto-upload="false"
-                      :on-change="handleWordRootsFileChange"
-                      :limit="1"
-                      accept=".xlsx,.csv"
-                    >
-                      <el-button type="primary" plain>
-                        <span>📁</span> 选择文件
-                      </el-button>
-                    </el-upload>
-                    <el-button type="success" @click="downloadTemplate">
-                      <span>📥</span> 下载模板
-                    </el-button>
-                  </div>
-                  <div v-if="wordRootsFileName" class="file-info">
-                    <el-tag effect="dark">{{ wordRootsFileName }}</el-tag>
-                    <el-button type="primary" size="small" @click="saveWordRoots">保存词根</el-button>
-                    <el-button type="danger" plain size="small" @click="clearWordRootsFile">清除</el-button>
-                  </div>
-                  <div v-if="parsedWordRoots.length > 0" class="preview-table">
-                    <div class="preview-title">预览 ({{ parsedWordRoots.length }} 条)</div>
-                    <el-table :data="parsedWordRoots" size="small" max-height="180" stripe>
-                      <el-table-column prop="business_domain" label="业务域" width="100" />
-                      <el-table-column prop="chinese_name" label="中文名" width="100" />
-                      <el-table-column prop="full_root" label="词根全称" width="120" />
-                      <el-table-column prop="abbr_root" label="缩写" width="80" />
-                      <el-table-column prop="recommended_type" label="类型" />
-                    </el-table>
-                  </div>
-                </el-tab-pane>
-              </el-tabs>
-            </el-card>
-
-            </div>
-
           <div class="side-by-side-container">
             <el-card class="prompt-card" shadow="hover">
               <template #header>
@@ -288,79 +240,12 @@
 {history_roots} - 历史词根
 {word_roots_content} - 词根内容
 {standards_content} - 规范内容
+{industry_context} - 行业背景
 {description} - 建表需求
 {db_type} - 数据库类型
-{root_match_priority} - 词根匹配优先级"
+                {root_match_priority} - 词根匹配优先级"
               />
             </el-card>
-
-            <el-card class="history-card" shadow="hover">
-            <template #header>
-              <div class="card-header">
-                <span class="card-title">📚 历史词根</span>
-                <div class="header-actions">
-                  <el-button type="primary" plain size="small" @click="saveHistoryRoots" :disabled="historyRoots.length === 0">保存</el-button>
-                  <el-button type="info" plain size="small" @click="loadHistoryRoots">刷新</el-button>
-                  <el-button type="warning" plain size="small" @click="showAddRootDialog">手动添加</el-button>
-                  <el-button type="danger" plain size="small" @click="clearHistoryRoots" :disabled="historyRoots.length === 0">清除全部</el-button>
-                </div>
-              </div>
-            </template>
-            <el-input
-              v-model="rootSearchQuery"
-              placeholder="搜索词根（中文或英文）"
-              size="small"
-              class="search-input"
-              clearable
-              style="margin-bottom: 10px"
-            />
-            <el-table
-              v-if="filteredHistoryRoots.length > 0"
-              :data="filteredHistoryRoots"
-              style="width: 100%; font-size: 15px; table-layout: fixed;"
-              size="default"
-              max-height="450"
-              stripe
-              border
-            >
-              <el-table-column prop="business_domain" label="业务域" show-overflow-tooltip />
-              <el-table-column prop="chinese_name" label="中文名称" show-overflow-tooltip />
-              <el-table-column prop="full_root" label="词根全称" show-overflow-tooltip />
-              <el-table-column prop="abbr_root" label="缩写词根" show-overflow-tooltip />
-              <el-table-column prop="recommended_type" label="推荐类型" show-overflow-tooltip />
-              <el-table-column label="操作" width="100">
-                <template #default="{ row }">
-                  <el-button type="primary" link size="small" @click="editRoot(row)">编辑</el-button>
-                  <el-button type="danger" link size="small" @click="removeRootByRoot(row)">删除</el-button>
-                </template>
-              </el-table-column>
-            </el-table>
-            <el-empty v-else description="暂无历史词根，生成DDL后会自动记录" />
-
-            <el-dialog v-model="editRootDialogVisible" title="编辑词根" width="500px">
-              <el-form :model="editingRoot" label-width="100px">
-                <el-form-item label="业务域">
-                  <el-input v-model="editingRoot.business_domain" />
-                </el-form-item>
-                <el-form-item label="中文名称">
-                  <el-input v-model="editingRoot.chinese_name" />
-                </el-form-item>
-                <el-form-item label="词根全称">
-                  <el-input v-model="editingRoot.full_root" />
-                </el-form-item>
-                <el-form-item label="缩写词根">
-                  <el-input v-model="editingRoot.abbr_root" />
-                </el-form-item>
-                <el-form-item label="推荐类型">
-                  <el-input v-model="editingRoot.recommended_type" />
-                </el-form-item>
-              </el-form>
-              <template #footer>
-                <el-button @click="editRootDialogVisible = false">取消</el-button>
-                <el-button type="primary" @click="saveRootEdit">确定</el-button>
-              </template>
-            </el-dialog>
-          </el-card>
           </div>
         </div>
 
@@ -564,11 +449,35 @@
             <el-card class="config-card" shadow="hover">
             <template #header>
               <div class="card-header">
-                <span class="card-title">📦 批量建表</span>
+                <span class="card-title">⚡ 建表生成</span>
               </div>
             </template>
+
+            <div class="generation-mode-switch">
+              <span class="config-label">输入方式：</span>
+              <el-radio-group v-model="generationMode" :disabled="batchGenerating">
+                <el-radio-button label="text">文本输入</el-radio-button>
+                <el-radio-button label="excel">Excel上传</el-radio-button>
+              </el-radio-group>
+            </div>
+
+            <el-card v-if="generationMode === 'text'" class="text-input-card" shadow="never">
+              <template #header>
+                <div class="card-header">
+                  <span class="card-title">📝 建表需求</span>
+                </div>
+              </template>
+              <el-input
+                v-model="description"
+                type="textarea"
+                :rows="8"
+                :disabled="batchGenerating"
+                placeholder="请输入自然语言描述，例如：
+创建一个订单表，包含订单号、用户ID、金额、下单时间等字段"
+              />
+            </el-card>
             
-            <div class="batch-upload-section">
+            <div v-else class="batch-upload-section">
               <el-upload
                 ref="batchUpload"
                 :auto-upload="false"
@@ -586,12 +495,12 @@
               </el-button>
             </div>
 
-            <div v-if="batchFileName" class="batch-file-info">
+            <div v-if="generationMode === 'excel' && batchFileName" class="batch-file-info">
               <el-tag effect="dark">{{ batchFileName }}</el-tag>
               <span class="batch-file-hint">已选择文件，可点击"开始生成"按钮</span>
             </div>
 
-            <div v-if="parsedBatchTables.length > 0" class="batch-preview">
+            <div v-if="generationMode === 'excel' && parsedBatchTables.length > 0" class="batch-preview">
               <div class="preview-title">📋 解析预览 ({{ parsedBatchTables.length }} 张表)</div>
               <el-table :data="parsedBatchTables" size="small" max-height="700" stripe>
                 <el-table-column type="index" label="序号" width="70" :index="(index) => index + 1" />
@@ -632,7 +541,7 @@
                 <el-switch v-model="batchEnableValidation" :disabled="batchGenerating" active-text="开启" inactive-text="关闭" />
                 <span class="config-hint">（关闭可提高生成速度）</span>
               </div>
-              <div class="config-item">
+              <div v-if="generationMode === 'excel'" class="config-item">
                 <span class="config-label">并发线程：</span>
                 <el-select v-model="batchMaxWorkers" style="width: 120px" :disabled="batchGenerating">
                   <el-option v-for="num in 10" :key="num" :label="num + ' 个'" :value="num" />
@@ -645,13 +554,13 @@
               <el-button 
                 type="success" 
                 size="large" 
-                @click="startBatchGenerate" 
+                @click="startGenerate" 
                 :loading="batchGenerating"
-                :disabled="!batchFile || !llmConfig.apiKey"
+                :disabled="!llmConfig.apiKey || (generationMode === 'excel' ? !batchFile : !description.trim())"
                 class="generate-btn"
               >
                 <span v-if="!batchGenerating">✨</span>
-                {{ batchGenerating ? '生成中...' : '开始生成' }}
+                {{ batchGenerating ? '生成中...' : (generationMode === 'excel' ? '开始生成' : '开始解析并生成') }}
               </el-button>
               <el-button 
                 v-if="batchGenerating"
@@ -912,7 +821,227 @@
             </div>
           </el-card>
         </div>
-      </main>
+              <div v-show="activeMenu === 'governance'" class="governance-view">
+          <el-card class="config-card" shadow="hover">
+            <template #header>
+              <div class="card-header">
+                <span class="card-title">📝 词根输入</span>
+                <div class="header-actions">
+                  <el-button type="primary" plain size="small" @click="previewWordRootsInput">
+                    解析预览
+                  </el-button>
+                  <el-button type="success" size="small" @click="saveWordRoots">
+                    保存到标准词根
+                  </el-button>
+                </div>
+              </div>
+            </template>
+            <el-tabs v-model="wordRootsTab" class="custom-tabs">
+              <el-tab-pane label="粘贴文本" name="text">
+                <el-input
+                  v-model="wordRootsText"
+                  type="textarea"
+                  :rows="6"
+                  placeholder="每行格式：业务域:域编码:中文名称:全称词根:缩写词根:推荐类型
+示例：订单:ord:订单:order:ord:VARCHAR(64)
+仅中文名称必填，其他字段允许为空"
+                />
+              </el-tab-pane>
+              <el-tab-pane label="上传文件" name="file">
+                <div class="upload-section">
+                  <el-upload
+                    ref="wordRootsUpload"
+                    :auto-upload="false"
+                    :on-change="handleWordRootsFileChange"
+                    :limit="1"
+                    accept=".xlsx,.csv,.txt"
+                  >
+                    <el-button type="primary" plain>
+                      <span>📁</span> 选择文件
+                    </el-button>
+                  </el-upload>
+                  <el-button type="success" @click="downloadTemplate">
+                    <span>📥</span> 下载模板
+                  </el-button>
+                </div>
+                <div v-if="wordRootsFileName" class="file-info">
+                  <el-tag effect="dark">{{ wordRootsFileName }}</el-tag>
+                  <el-button type="primary" size="small" @click="previewWordRootsInput">解析预览</el-button>
+                  <el-button type="danger" plain size="small" @click="clearWordRootsFile">清除</el-button>
+                </div>
+              </el-tab-pane>
+            </el-tabs>
+            <div v-if="parsedWordRoots.length > 0" class="preview-table">
+              <div class="preview-title">预览 ({{ parsedWordRoots.length }} 条)</div>
+              <el-table :data="parsedWordRoots" size="small" max-height="220" stripe>
+                <el-table-column prop="business_domain" label="业务域" width="120" />
+                <el-table-column prop="domain_code" label="域编码" width="90" />
+                <el-table-column prop="chinese_name" label="中文名称" width="140" />
+                <el-table-column prop="full_root" label="全称词根" width="160" />
+                <el-table-column prop="abbr_root" label="缩写词根" width="120" />
+                <el-table-column prop="recommended_type" label="推荐类型" min-width="140" />
+              </el-table>
+            </div>
+          </el-card>
+
+          <el-card class="config-card" shadow="hover">
+            <template #header>
+              <div class="card-header">
+                <span class="card-title">标准词根治理</span>
+                <div class="header-actions">
+                  <el-button type="primary" size="small" :loading="governanceRunning" @click="runGovernance">
+                    发起治理
+                  </el-button>
+                  <el-button
+                    type="success"
+                    size="small"
+                    :disabled="governanceCandidates.length === 0"
+                    @click="applyGovernance"
+                  >
+                    应用结果
+                  </el-button>
+                  <el-button type="primary" plain size="small" @click="loadGovernanceData">刷新</el-button>
+                </div>
+              </div>
+            </template>
+            <div v-if="governanceProgressVisible" class="governance-progress-card">
+              <div class="governance-progress-header">
+                <span class="governance-panel-title">治理进度</span>
+                <el-tag :type="governanceRunning ? 'warning' : 'success'">
+                  {{ governanceStatusText || '未开始' }}
+                </el-tag>
+              </div>
+              <div class="governance-progress-meta">
+                <span>原始词根：{{ governanceStats.rawCount }}</span>
+                <span>整理后：{{ governanceStats.preparedCount }}</span>
+                <span>剔除标准：{{ governanceStats.excludedStandardCount }}</span>
+                <span>待治理：{{ governanceStats.filteredCount }}</span>
+                <span>候选结果：{{ governanceStats.candidateCount }}</span>
+                <span>已耗时：{{ governanceElapsedText }}</span>
+              </div>
+              <div class="governance-progress-meta" v-if="governanceStats.chunkCount > 0">
+                <span>总批次：{{ governanceStats.chunkCount }}</span>
+                <span>并发线程：{{ governanceStats.actualWorkers || governanceStats.requestedWorkers }}</span>
+                <span>已完成：{{ governanceStats.completedChunks }}/{{ governanceStats.chunkCount }}</span>
+                <span v-if="governanceStats.activeChunksText">处理中：{{ governanceStats.activeChunksText }}</span>
+              </div>
+              <div class="governance-progress-detail">
+                {{ governanceDetailText }}
+              </div>
+              <el-steps :active="governanceActiveStep" finish-status="success" simple>
+                <el-step title="加载历史词根" />
+                <el-step title="清洗去重" />
+                <el-step title="构建治理提示词" />
+                <el-step title="发送模型请求" />
+                <el-step title="等待模型响应" />
+                <el-step title="解析返回结果" />
+                <el-step title="生成候选词根" />
+              </el-steps>
+              <el-progress
+                :percentage="governanceProgressPercent"
+                :status="governanceRunning ? '' : 'success'"
+                style="margin-top: 12px;"
+              />
+            </div>
+            <div class="gov-stats" style="margin-bottom: 12px">
+              <el-tag type="success">标准词根: {{ standardRoots.length }} 条</el-tag>
+              <el-tag type="info" style="margin-left: 10px">治理来源: {{ historicalRoots.length }} 条</el-tag>
+            </div>
+            <div class="governance-panels">
+              <div class="governance-panel">
+                <div class="governance-panel-title">历史词根</div>
+                <div class="header-actions governance-toolbar">
+                  <el-input
+                    v-model="rootSearchQuery"
+                    placeholder="搜索词根（中文或英文）"
+                    size="small"
+                    clearable
+                    class="governance-search"
+                  />
+                  <el-button type="primary" plain size="small" @click="saveHistoricalRoots" :disabled="historicalRoots.length === 0">
+                    保存
+                  </el-button>
+                  <el-button type="info" plain size="small" @click="loadGovernanceData">刷新</el-button>
+                  <el-button type="warning" plain size="small" @click="showAddRootDialog">手动添加</el-button>
+                  <el-button type="danger" plain size="small" @click="clearHistoricalRoots" :disabled="historicalRoots.length === 0">
+                    清除全部
+                  </el-button>
+                </div>
+                <el-table v-if="filteredHistoricalRoots.length > 0" :data="filteredHistoricalRoots" size="small" max-height="320" stripe>
+                  <el-table-column prop="business_domain" label="业务域" width="120" />
+                  <el-table-column prop="domain_code" label="域编码" width="90" />
+                  <el-table-column prop="chinese_name" label="中文名称" width="140" />
+                  <el-table-column prop="full_root" label="全称词根" width="150" />
+                  <el-table-column prop="abbr_root" label="缩写词根" width="120" />
+                  <el-table-column prop="recommended_type" label="推荐类型" min-width="120" />
+                  <el-table-column label="操作" width="100">
+                    <template #default="{ row }">
+                      <el-button type="primary" link size="small" @click="editHistoricalRoot(row)">编辑</el-button>
+                      <el-button type="danger" link size="small" @click="removeHistoricalRoot(row)">删除</el-button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <el-empty v-else description="暂无历史词根，生成DDL后会自动记录" />
+              </div>
+              <div class="governance-panel">
+                <div class="governance-panel-title">治理结果</div>
+                <el-empty
+                  v-if="governanceCandidates.length === 0"
+                  description="点击“发起治理”后，这里会展示待应用的标准词根候选"
+                />
+                <el-table v-else :data="governanceCandidates" size="small" max-height="320" stripe>
+                  <el-table-column prop="business_domain" label="业务域" width="100" />
+                  <el-table-column prop="domain_code" label="域编码" width="80" />
+                  <el-table-column prop="chinese_name" label="中文名称" width="120" />
+                  <el-table-column prop="full_root" label="全称词根" width="150" />
+                  <el-table-column prop="abbr_root" label="缩写词根" width="100" />
+                  <el-table-column prop="recommended_type" label="推荐类型" width="120" />
+                  <el-table-column prop="governance_status" label="治理状态" width="100" />
+                </el-table>
+              </div>
+            </div>
+            <div class="governance-panel-title" style="margin-top: 16px;">当前标准词根</div>
+            <div class="header-actions governance-toolbar" style="margin-bottom: 12px;">
+              <el-input
+                v-model="standardRootSearchQuery"
+                placeholder="搜索标准词根（中文或英文）"
+                size="small"
+                clearable
+                class="governance-search"
+              />
+              <el-button type="info" plain size="small" @click="loadGovernanceData">刷新</el-button>
+              <el-button type="warning" plain size="small" @click="showAddRootDialog('standard')">手动添加</el-button>
+              <el-upload
+                ref="standardRootsUpload"
+                :auto-upload="false"
+                :show-file-list="false"
+                :on-change="handleStandardRootsImportFileChange"
+                :limit="1"
+                accept=".xlsx,.csv,.txt"
+              >
+                <el-button type="primary" plain size="small">Excel导入</el-button>
+              </el-upload>
+              <el-button type="success" plain size="small" @click="exportStandardRootsToExcel" :disabled="standardRoots.length === 0">导出Excel</el-button>
+            </div>
+            <el-table :data="filteredStandardRoots" size="small" max-height="320" stripe>
+              <el-table-column prop="business_domain" label="业务域" width="100" />
+              <el-table-column prop="domain_code" label="域编码" width="80" />
+              <el-table-column prop="chinese_name" label="中文名称" width="120" />
+              <el-table-column prop="full_root" label="全称词根" width="150" />
+              <el-table-column prop="abbr_root" label="缩写词根" width="100" />
+              <el-table-column prop="recommended_type" label="推荐类型" width="120" />
+              <el-table-column prop="updated_at" label="最近修改" width="170" />
+              <el-table-column label="操作" width="160">
+                <template #default="{ row }">
+                  <el-button type="primary" link size="small" @click="editStandardRoot(row)">编辑</el-button>
+                  <el-button type="danger" link size="small" @click="removeStandardRoot(row)">删除</el-button>
+                  <el-button type="info" link size="small" @click="showStandardRootHistory(row)">记录</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-card>
+        </div>
+</main>
 
       <footer class="footer">
         © 2025 数仓建表助手 - AI 驱动的智能 DDL 生成工具
@@ -1036,8 +1165,88 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="editRootDialogVisible" title="编辑词根" width="500px">
+      <el-form :model="editingRoot" label-width="100px">
+        <el-form-item label="业务域">
+          <el-input v-model="editingRoot.business_domain" />
+        </el-form-item>
+        <el-form-item label="域编码">
+          <el-input v-model="editingRoot.domain_code" />
+        </el-form-item>
+        <el-form-item label="中文名称">
+          <el-input v-model="editingRoot.chinese_name" />
+        </el-form-item>
+        <el-form-item label="词根全称">
+          <el-input v-model="editingRoot.full_root" />
+        </el-form-item>
+        <el-form-item label="缩写词根">
+          <el-input v-model="editingRoot.abbr_root" />
+        </el-form-item>
+        <el-form-item label="推荐类型">
+          <el-input v-model="editingRoot.recommended_type" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editRootDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveHistoricalRootEdit">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="standardRootEditDialogVisible" title="编辑标准词根" width="520px">
+      <el-form :model="editingStandardRoot" label-width="100px">
+        <el-form-item label="业务域">
+          <el-input v-model="editingStandardRoot.business_domain" />
+        </el-form-item>
+        <el-form-item label="域编码">
+          <el-input v-model="editingStandardRoot.domain_code" />
+        </el-form-item>
+        <el-form-item label="中文名称">
+          <el-input v-model="editingStandardRoot.chinese_name" />
+        </el-form-item>
+        <el-form-item label="词根全称">
+          <el-input v-model="editingStandardRoot.full_root" />
+        </el-form-item>
+        <el-form-item label="缩写词根">
+          <el-input v-model="editingStandardRoot.abbr_root" />
+        </el-form-item>
+        <el-form-item label="推荐类型">
+          <el-input v-model="editingStandardRoot.recommended_type" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="standardRootEditDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveStandardRootEdit">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="standardRootHistoryDialogVisible" :title="currentStandardRootTitle" width="760px">
+      <el-table :data="currentStandardRootHistory" size="small" max-height="420" stripe>
+        <el-table-column prop="edited_at" label="修改时间" width="180" />
+        <el-table-column prop="action" label="动作" width="90" />
+        <el-table-column label="修改前" min-width="220">
+          <template #default="{ row }">
+            <div>{{ formatRootSnapshot(row.before) }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="修改后" min-width="220">
+          <template #default="{ row }">
+            <div>{{ formatRootSnapshot(row.after) }}</div>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="standardRootHistoryDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="addRootDialogVisible" title="➕ 添加词根" width="500px">
       <el-form :model="addRootForm" label-width="100px">
+        <el-form-item label="业务域">
+          <el-input v-model="addRootForm.businessDomain" placeholder="如：订单" size="large" />
+        </el-form-item>
+        <el-form-item label="域编码">
+          <el-input v-model="addRootForm.domainCode" placeholder="如：ord" size="large" />
+        </el-form-item>
         <el-form-item label="中文名称">
           <el-input v-model="addRootForm.chineseName" placeholder="如：订单号" size="large" />
         </el-form-item>
@@ -1182,7 +1391,8 @@ const llmConfig = reactive({
   apiUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
   model: 'qwen3.5-122b-a10b',
   temperature: 0.3,
-  abbrMaxLen: 4
+  abbrMaxLen: 4,
+  industryContext: ''
 })
 const testing = ref(false)
 const apiKeySaved = ref(false)
@@ -1193,6 +1403,7 @@ const wordRootsFileName = ref('')
 const parsedWordRoots = ref([])
 const wordRootsUpload = ref(null)
 const wordRootsFile = ref(null)
+const standardRootsUpload = ref(null)
 
 const standardsTab = ref('text')
 const standardsText = ref('')
@@ -1205,6 +1416,7 @@ const currentStandardId = ref('')
 const batchUpload = ref(null)
 const batchFile = ref(null)
 const batchFileName = ref('')
+const generationMode = ref('text')
 const batchDbType = ref('mysql')
 const batchRootPriority = ref('abbr')
 const batchCutMode = ref('accurate')
@@ -1233,6 +1445,8 @@ const fieldProgressPercent = computed(() => {
 })
 let progressPollingInterval = null
 let fallbackProgressInterval = null
+let governanceProgressInterval = null
+let governanceServerProgressInterval = null
 
 const historyList = ref([])
 const historyLoading = ref(false)
@@ -1255,22 +1469,79 @@ let timerInterval = null
 
 const singleNewRoots = ref([])
 
-const historyRoots = ref([])
+const standardRoots = ref([])
+const historicalRoots = ref([])
+const governanceCandidates = ref([])
+const governanceRunning = ref(false)
+const governanceTaskId = ref('')
+const governanceActiveStep = ref(0)
+const governanceStatusText = ref('')
+const governanceDetailText = ref('')
+const governanceStartedAt = ref(0)
+const governanceElapsedMs = ref(0)
+const governanceStats = reactive({
+  rawCount: 0,
+  preparedCount: 0,
+  filteredCount: 0,
+  excludedStandardCount: 0,
+  standardRootCount: 0,
+  candidateCount: 0,
+  promptLength: 0,
+  llmElapsedMs: 0,
+  chunkCount: 0,
+  requestedWorkers: 0,
+  actualWorkers: 0,
+  completedChunks: 0,
+  currentChunk: 0,
+  activeChunksText: ''
+})
 const rootSearchQuery = ref('')
+const standardRootSearchQuery = ref('')
 const editRootDialogVisible = ref(false)
+const editHistoricalRootIndex = ref(-1)
+const standardRootEditDialogVisible = ref(false)
+const standardRootHistoryDialogVisible = ref(false)
+const editingStandardRootId = ref('')
+const currentStandardRootTitle = ref('')
+const currentStandardRootHistory = ref([])
 const editingRoot = reactive({
   business_domain: '',
+  domain_code: '',
   chinese_name: '',
   full_root: '',
   abbr_root: '',
   recommended_type: ''
 })
+const editingStandardRoot = reactive({
+  root_id: '',
+  business_domain: '',
+  domain_code: '',
+  chinese_name: '',
+  full_root: '',
+  abbr_root: '',
+  recommended_type: '',
+  updated_at: '',
+  change_history: []
+})
+const governanceProgressVisible = computed(() => governanceRunning.value || governanceStatusText.value || governanceCandidates.value.length > 0)
+const governanceProgressPercent = computed(() => Math.round(((governanceActiveStep.value + 1) / 7) * 100))
+const governanceElapsedText = computed(() => formatDuration(governanceElapsedMs.value))
 
-const filteredHistoryRoots = computed(() => {
-  if (!rootSearchQuery.value) return historyRoots.value
+const filteredHistoricalRoots = computed(() => {
+  if (!rootSearchQuery.value) return historicalRoots.value
   const query = rootSearchQuery.value.toLowerCase()
-  return historyRoots.value.filter(r => 
+  return historicalRoots.value.filter(r => 
     r.chinese_name?.toLowerCase().includes(query) || 
+    r.full_root?.toLowerCase().includes(query) ||
+    r.abbr_root?.toLowerCase().includes(query)
+  )
+})
+
+const filteredStandardRoots = computed(() => {
+  if (!standardRootSearchQuery.value) return standardRoots.value
+  const query = standardRootSearchQuery.value.toLowerCase()
+  return standardRoots.value.filter(r =>
+    r.chinese_name?.toLowerCase().includes(query) ||
     r.full_root?.toLowerCase().includes(query) ||
     r.abbr_root?.toLowerCase().includes(query)
   )
@@ -1307,7 +1578,10 @@ const executeStatementCount = computed(() => {
 })
 
 const addRootDialogVisible = ref(false)
+const addRootTarget = ref('historical')
 const addRootForm = reactive({
+  businessDomain: '',
+  domainCode: '',
   chineseName: '',
   fullRoot: '',
   abbrRoot: '',
@@ -1360,13 +1634,278 @@ const highlightSQL = (sql) => {
 }
 
 const formatHistoryRoots = () => {
-  if (historyRoots.value.length === 0) return ''
-  return historyRoots.value.map(r => {
-    const parts = [r.chinese_name, r.full_root]
-    if (r.abbr_root) parts.push(r.abbr_root)
-    if (r.recommended_type) parts.push(r.recommended_type)
+  if (historicalRoots.value.length === 0) return ''
+  return historicalRoots.value.map(r => {
+    const parts = [
+      r.business_domain || '',
+      r.domain_code || '',
+      r.chinese_name || '',
+      r.full_root || '',
+      r.abbr_root || '',
+      r.recommended_type || ''
+    ]
     return parts.join(':')
   }).join('\n')
+}
+
+const normalizeRootItem = (item = {}) => ({
+  business_domain: item.business_domain?.trim?.() || '',
+  domain_code: item.domain_code?.trim?.() || '',
+  chinese_name: item.chinese_name?.trim?.() || '',
+  full_root: item.full_root?.trim?.() || '',
+  abbr_root: item.abbr_root?.trim?.() || '',
+  recommended_type: item.recommended_type?.trim?.() || '',
+  root_id: item.root_id || '',
+  usage_count: Number(item.usage_count || item.source_count || 1),
+  updated_at: item.updated_at || '',
+  created_at: item.created_at || '',
+  governance_status: item.governance_status || '',
+  merged_from: Array.isArray(item.merged_from) ? item.merged_from : [],
+  change_history: Array.isArray(item.change_history) ? item.change_history : []
+})
+
+const buildRootIdentity = (item = {}) => {
+  const normalized = normalizeRootItem(item)
+  return [
+    normalized.business_domain.toLowerCase(),
+    normalized.domain_code.toLowerCase(),
+    normalized.chinese_name.toLowerCase(),
+    normalized.full_root.toLowerCase(),
+    normalized.abbr_root.toLowerCase(),
+    normalized.recommended_type.toLowerCase()
+  ].join('|')
+}
+
+const mergeRootLists = (baseRoots = [], incomingRoots = []) => {
+  const mergedMap = new Map()
+  baseRoots.forEach((item) => {
+    mergedMap.set(buildRootIdentity(item), normalizeRootItem(item))
+  })
+  incomingRoots.forEach((item) => {
+    const normalized = normalizeRootItem(item)
+    if (!normalized.chinese_name) return
+    mergedMap.set(buildRootIdentity(normalized), normalized)
+  })
+  return [...mergedMap.values()]
+}
+
+const formatRootSnapshot = (snapshot = {}) => {
+  const normalized = normalizeRootItem(snapshot)
+  const parts = [
+    normalized.business_domain || '-',
+    normalized.chinese_name || '-',
+    normalized.full_root || '-',
+    normalized.abbr_root || '-',
+    normalized.recommended_type || '-'
+  ]
+  return parts.join(' / ')
+}
+
+const estimatePreparedHistoricalRoots = (roots = []) => {
+  const seen = new Set()
+  let count = 0
+  roots.forEach((root) => {
+    const normalized = normalizeRootItem(root)
+    if (!normalized.chinese_name) return
+    const key = [
+      normalized.business_domain.toLowerCase(),
+      normalized.domain_code.toLowerCase(),
+      normalized.chinese_name.toLowerCase(),
+      normalized.full_root.toLowerCase(),
+      normalized.abbr_root.toLowerCase(),
+      normalized.recommended_type.toLowerCase()
+    ].join('|')
+    if (seen.has(key)) return
+    seen.add(key)
+    count += 1
+  })
+  return count
+}
+
+const buildStandardRootIndexes = (roots = []) => {
+  const chinese = new Set()
+  const full = new Set()
+  const abbr = new Set()
+  const pair = new Set()
+  roots.forEach((root) => {
+    const normalized = normalizeRootItem(root)
+    const chineseName = normalized.chinese_name.toLowerCase()
+    const fullRoot = normalized.full_root.toLowerCase()
+    const abbrRoot = normalized.abbr_root.toLowerCase()
+    if (chineseName) chinese.add(chineseName)
+    if (fullRoot) full.add(fullRoot)
+    if (abbrRoot) abbr.add(abbrRoot)
+    if (fullRoot || abbrRoot) pair.add(`${fullRoot}|${abbrRoot}`)
+  })
+  return { chinese, full, abbr, pair }
+}
+
+const estimateGovernanceFilterStats = (historicalRoots = [], standardRootsList = []) => {
+  const indexes = buildStandardRootIndexes(standardRootsList)
+  const preparedMap = new Map()
+  historicalRoots.forEach((root) => {
+    const normalized = normalizeRootItem(root)
+    if (!normalized.chinese_name) return
+    const key = [
+      normalized.business_domain.toLowerCase(),
+      normalized.domain_code.toLowerCase(),
+      normalized.chinese_name.toLowerCase(),
+      normalized.full_root.toLowerCase(),
+      normalized.abbr_root.toLowerCase(),
+      normalized.recommended_type.toLowerCase()
+    ].join('|')
+    if (!preparedMap.has(key)) {
+      preparedMap.set(key, normalized)
+    }
+  })
+
+  let excluded = 0
+  let kept = 0
+  preparedMap.forEach((root) => {
+    const chineseName = root.chinese_name.toLowerCase()
+    const fullRoot = root.full_root.toLowerCase()
+    const abbrRoot = root.abbr_root.toLowerCase()
+    const matchedStandard = (
+      (chineseName && indexes.chinese.has(chineseName)) ||
+      (fullRoot && indexes.full.has(fullRoot)) ||
+      (abbrRoot && indexes.abbr.has(abbrRoot)) ||
+      ((fullRoot || abbrRoot) && indexes.pair.has(`${fullRoot}|${abbrRoot}`))
+    )
+    if (matchedStandard) {
+      excluded += 1
+    } else {
+      kept += 1
+    }
+  })
+
+  return {
+    preparedCount: preparedMap.size,
+    excludedStandardCount: excluded,
+    filteredCount: kept,
+    standardRootCount: standardRootsList.length
+  }
+}
+
+const stopGovernanceHeartbeat = () => {
+  if (governanceProgressInterval) {
+    clearInterval(governanceProgressInterval)
+    governanceProgressInterval = null
+  }
+  if (governanceServerProgressInterval) {
+    clearInterval(governanceServerProgressInterval)
+    governanceServerProgressInterval = null
+  }
+}
+
+const startGovernanceHeartbeat = () => {
+  stopGovernanceHeartbeat()
+  governanceProgressInterval = setInterval(() => {
+    governanceElapsedMs.value = Date.now() - governanceStartedAt.value
+    if (governanceActiveStep.value === 4) {
+      const dots = '.'.repeat((Math.floor(governanceElapsedMs.value / 1000) % 3) + 1)
+      const chunkInfo = governanceStats.chunkCount > 0
+        ? `，共 ${governanceStats.chunkCount} 批，已完成 ${governanceStats.completedChunks} 批`
+        : ''
+      governanceDetailText.value = `模型正在归并历史词根并补齐标准字段${dots}${chunkInfo}，已等待 ${formatDuration(governanceElapsedMs.value)}`
+    }
+  }, 1000)
+}
+
+const applyGovernanceProgress = (progress) => {
+  if (!progress) return
+  governanceStats.rawCount = progress.raw_root_count ?? governanceStats.rawCount
+  governanceStats.preparedCount = progress.prepared_root_count ?? governanceStats.preparedCount
+  governanceStats.filteredCount = progress.filtered_root_count ?? governanceStats.filteredCount
+  governanceStats.excludedStandardCount = progress.excluded_standard_count ?? governanceStats.excludedStandardCount
+  governanceStats.standardRootCount = progress.standard_root_count ?? governanceStats.standardRootCount
+  governanceStats.chunkCount = progress.chunk_count ?? governanceStats.chunkCount
+  governanceStats.requestedWorkers = progress.requested_workers ?? governanceStats.requestedWorkers
+  governanceStats.actualWorkers = progress.actual_workers ?? governanceStats.actualWorkers
+  governanceStats.completedChunks = progress.completed_chunks ?? governanceStats.completedChunks
+  governanceStats.currentChunk = progress.current_chunk ?? governanceStats.currentChunk
+  governanceStats.candidateCount = progress.final_candidate_count ?? governanceStats.candidateCount
+  governanceStats.llmElapsedMs = progress.llm_elapsed_ms ?? governanceStats.llmElapsedMs
+  governanceStats.activeChunksText = Array.isArray(progress.active_chunks) && progress.active_chunks.length > 0
+    ? progress.active_chunks.join(', ')
+    : ''
+
+  if (progress.stage === 'chunk_running') {
+    governanceActiveStep.value = 4
+    governanceStatusText.value = `第 5/7 步：分批治理中`
+  } else if (progress.stage === 'merge_running') {
+    governanceActiveStep.value = 4
+    governanceStatusText.value = `第 5/7 步：全局合并中`
+  } else if (progress.stage === 'filtering_standard') {
+    governanceActiveStep.value = 1
+    governanceStatusText.value = '第 2/7 步：清洗并过滤标准词根'
+  } else if (progress.stage === 'completed') {
+    governanceActiveStep.value = 6
+    governanceStatusText.value = progress.message || governanceStatusText.value
+  } else if (progress.stage && governanceRunning.value) {
+    governanceStatusText.value = progress.message || governanceStatusText.value
+  }
+
+  if (progress.message && governanceRunning.value) {
+    governanceDetailText.value = progress.message
+  }
+}
+
+const startGovernanceProgressPolling = (taskId) => {
+  if (!taskId) return
+  governanceTaskId.value = taskId
+  if (governanceServerProgressInterval) {
+    clearInterval(governanceServerProgressInterval)
+  }
+  const poll = async () => {
+    try {
+      const response = await axios.get(`/api/governance/progress/${taskId}`)
+      if (response.data.code === 0 && response.data.data) {
+        applyGovernanceProgress(response.data.data)
+      }
+    } catch (error) {
+      console.error('加载治理进度失败:', error)
+    }
+  }
+  poll()
+  governanceServerProgressInterval = setInterval(poll, 1000)
+}
+
+const parseWordRootsTextInput = () => {
+  return wordRootsText.value
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line && !line.startsWith('#') && !line.startsWith('//'))
+    .map(line => line.replace(/：/g, ':').split(':').map(part => part.trim()))
+    .map(parts => {
+      if (parts.length >= 6) {
+        return normalizeRootItem({
+          business_domain: parts[0],
+          domain_code: parts[1],
+          chinese_name: parts[2],
+          full_root: parts[3],
+          abbr_root: parts[4],
+          recommended_type: parts[5]
+        })
+      }
+      if (parts.length >= 4) {
+        return normalizeRootItem({
+          chinese_name: parts[0],
+          full_root: parts[1],
+          abbr_root: parts[2],
+          recommended_type: parts[3]
+        })
+      }
+      if (parts.length >= 2) {
+        return normalizeRootItem({
+          chinese_name: parts[0],
+          full_root: parts[1],
+          abbr_root: parts[2] || '',
+          recommended_type: parts[3] || ''
+        })
+      }
+      return null
+    })
+    .filter(item => item && item.chinese_name)
 }
 
 const loadConfigs = async () => {
@@ -1380,6 +1919,7 @@ const loadConfigs = async () => {
         llmConfig.model = defaultConfig.model
         llmConfig.temperature = defaultConfig.temperature !== undefined ? defaultConfig.temperature : 0.3
         llmConfig.abbrMaxLen = defaultConfig.abbrMaxLen !== undefined ? defaultConfig.abbrMaxLen : 4
+        llmConfig.industryContext = defaultConfig.industryContext || ''
         if (defaultConfig.apiKey) {
           llmConfig.apiKey = decodeKey(defaultConfig.apiKey)
         apiKeySaved.value = true
@@ -1463,6 +2003,7 @@ const saveConfig = () => {
       model: llmConfig.model,
       temperature: llmConfig.temperature,
       abbrMaxLen: llmConfig.abbrMaxLen,
+      industryContext: llmConfig.industryContext,
       isDefault: saveForm.isDefault
     }
   const existingIndex = savedConfigs.value.findIndex(c => c.name === config.name)
@@ -1516,6 +2057,7 @@ watch(selectedConfig, (newVal) => {
         llmConfig.model = config.model
         llmConfig.temperature = config.temperature !== undefined ? config.temperature : 0.3
         llmConfig.abbrMaxLen = config.abbrMaxLen !== undefined ? config.abbrMaxLen : 4
+        llmConfig.industryContext = config.industryContext || ''
       }
     }
   })
@@ -1655,7 +2197,6 @@ const downloadTemplate = async () => {
 const handleWordRootsFileChange = (file) => {
   wordRootsFileName.value = file.name
   wordRootsFile.value = file.raw
-  parseWordRootsFile()
 }
 
 const parseWordRootsFile = async () => {
@@ -1668,7 +2209,7 @@ const parseWordRootsFile = async () => {
       headers: { 'Content-Type': 'multipart/form-data' }
     })
     if (response.data.code === 0) {
-      parsedWordRoots.value = response.data.data
+      parsedWordRoots.value = (response.data.data || []).map(normalizeRootItem).filter(item => item.chinese_name)
       ElMessage.success(`成功解析 ${parsedWordRoots.value.length} 条词根`)
     }
   } catch (error) {
@@ -1676,18 +2217,44 @@ const parseWordRootsFile = async () => {
   }
 }
 
+const previewWordRootsInput = async () => {
+  if (wordRootsTab.value === 'text') {
+    parsedWordRoots.value = parseWordRootsTextInput()
+    if (parsedWordRoots.value.length === 0) {
+      ElMessage.warning('没有解析到有效词根，请至少填写中文名称')
+      return
+    }
+    ElMessage.success(`成功解析 ${parsedWordRoots.value.length} 条词根`)
+    return
+  }
+
+  await parseWordRootsFile()
+}
+
 const saveWordRoots = async () => {
+  if (wordRootsTab.value === 'text') {
+    parsedWordRoots.value = parseWordRootsTextInput()
+  } else if (parsedWordRoots.value.length === 0) {
+    await parseWordRootsFile()
+  }
+
   if (parsedWordRoots.value.length === 0) {
     ElMessage.warning('没有可保存的词根')
     return
   }
   try {
     await axios.post('/api/word-roots', parsedWordRoots.value)
-    ElMessage.success('词根保存成功')
-    await loadHistoryRoots()
+    await loadGovernanceData()
+    ElMessage.success('标准词根保存成功')
   } catch (error) {
     ElMessage.error('保存失败: ' + (error.message || '未知错误'))
   }
+}
+
+const saveStandardRoots = async (roots, successMessage = '标准词根保存成功') => {
+  await axios.post('/api/word-roots', roots)
+  await loadGovernanceData()
+  ElMessage.success(successMessage)
 }
 
 const clearWordRootsFile = () => {
@@ -1911,6 +2478,115 @@ const generateTaskId = () => {
   return 'task_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
 }
 
+const resetGenerationTaskState = () => {
+  batchGenerating.value = true
+  batchProgress.value = generationMode.value === 'text' ? '输入解析中...' : '准备中...'
+  batchProgressPercent.value = 0
+  batchResult.value = null
+  batchNewRoots.value = []
+  currentTaskId.value = generateTaskId()
+  realProgress.value = null
+  fieldStats.value = null
+  fieldProgress.value = null
+}
+
+const startTextGenerate = async () => {
+  if (!description.value.trim()) {
+    ElMessage.warning('请输入建表需求')
+    return
+  }
+  if (!llmConfig.apiKey) {
+    ElMessage.warning('请先在基础配置中设置API Key')
+    return
+  }
+
+  resetGenerationTaskState()
+
+  try {
+    const response = await axios.post('/api/text-generate-ddl-task', {
+      llm_config: {
+        api_key: llmConfig.apiKey,
+        api_url: llmConfig.apiUrl,
+        model: llmConfig.model,
+        temperature: llmConfig.temperature,
+        abbr_max_len: llmConfig.abbrMaxLen,
+        industry_context: llmConfig.industryContext || ''
+      },
+      description: description.value,
+      db_type: batchDbType.value,
+      custom_prompt: customPrompt.value,
+      root_match_priority: batchRootPriority.value,
+      cut_mode: batchCutMode.value,
+      enable_validation: batchEnableValidation.value,
+      task_id: currentTaskId.value
+    })
+
+    if (response.data.code === 0) {
+      ElMessage.info('任务已启动，正在处理...')
+      startProgressPolling()
+    } else {
+      ElMessage.error(response.data.message || '任务启动失败')
+      batchGenerating.value = false
+    }
+  } catch (error) {
+    ElMessage.error('任务启动失败: ' + (error.message || '未知错误'))
+    console.error(error)
+    batchGenerating.value = false
+  }
+}
+
+const handleStandardRootsImportFileChange = async (file) => {
+  const uploadRef = standardRootsUpload.value
+  if (uploadRef) {
+    uploadRef.clearFiles()
+  }
+  if (!file?.raw) {
+    return
+  }
+  try {
+    const formData = new FormData()
+    formData.append('file', file.raw)
+    formData.append('parse_type', 'roots')
+    const response = await axios.post('/api/parse-file', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+    const parsedRoots = response.data.code === 0
+      ? (response.data.data || []).map(normalizeRootItem).filter(item => item.chinese_name)
+      : []
+    if (parsedRoots.length === 0) {
+      ElMessage.warning('没有解析到可导入的标准词根')
+      return
+    }
+    const mergedRoots = mergeRootLists(standardRoots.value, parsedRoots)
+    await saveStandardRoots(mergedRoots, `标准词根导入成功，共新增/合并 ${parsedRoots.length} 条`)
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || error.message || '标准词根导入失败')
+  }
+}
+
+const exportStandardRootsToExcel = () => {
+  if (standardRoots.value.length === 0) {
+    ElMessage.warning('暂无可导出的标准词根')
+    return
+  }
+  const exportRows = standardRoots.value.map((item) => {
+    const normalized = normalizeRootItem(item)
+    return {
+      '业务域': normalized.business_domain,
+      '域编码': normalized.domain_code,
+      '中文名称': normalized.chinese_name,
+      '全称词根': normalized.full_root,
+      '缩写词根': normalized.abbr_root,
+      '推荐类型': normalized.recommended_type
+    }
+  })
+  const worksheet = XLSX.utils.json_to_sheet(exportRows)
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, worksheet, '标准词根')
+  XLSX.writeFile(workbook, '标准词根.xlsx')
+  ElMessage.success('标准词根导出成功')
+}
+
 const startBatchGenerate = async () => {
   if (!batchFile.value) {
     ElMessage.warning('请先选择Excel文件')
@@ -1921,21 +2597,14 @@ const startBatchGenerate = async () => {
     return
   }
 
-  batchGenerating.value = true
-  batchProgress.value = '准备中...'
-  batchProgressPercent.value = 0
-  batchResult.value = null
-  batchNewRoots.value = []
-  currentTaskId.value = generateTaskId()
-  realProgress.value = null
-  fieldStats.value = null
-  fieldProgress.value = null
+  resetGenerationTaskState()
 
   const formData = new FormData()
   formData.append('file', batchFile.value)
   formData.append('api_key', llmConfig.apiKey)
   formData.append('api_url', llmConfig.apiUrl)
   formData.append('model', llmConfig.model)
+  formData.append('industry_context', llmConfig.industryContext || '')
   formData.append('db_type', batchDbType.value)
   formData.append('root_match_priority', batchRootPriority.value)
   formData.append('cut_mode', batchCutMode.value)
@@ -1964,6 +2633,14 @@ const startBatchGenerate = async () => {
     console.error(error)
     batchGenerating.value = false
   }
+}
+
+const startGenerate = async () => {
+  if (generationMode.value === 'text') {
+    await startTextGenerate()
+    return
+  }
+  await startBatchGenerate()
 }
 
 const startProgressPolling = () => {
@@ -2066,7 +2743,7 @@ const fetchBatchResult = async () => {
         fieldStats.value = batchResult.value.field_stats
       }
       
-      ElMessage.success('批量生成完成')
+      ElMessage.success(generationMode.value === 'text' ? '生成完成' : '批量生成完成')
     } else if (response.data.code === 1 && response.data.message === '任务处理中或不存在') {
       return
     } else {
@@ -2182,7 +2859,7 @@ const downloadBatchDDL = () => {
 }
 
 const validateRootItem = (item) => {
-  const requiredFields = ['business_domain', 'chinese_name', 'full_root', 'abbr_root', 'recommended_type']
+  const requiredFields = ['chinese_name']
   const missingFields = requiredFields.filter(field => !item[field])
   if (missingFields.length > 0) {
     console.warn('词根数据缺少必填字段:', { item, missingFields })
@@ -2211,7 +2888,7 @@ const saveBatchNewRoots = async () => {
     if (response.data.code === 0) {
       ElMessage.success(response.data.message || '新词根保存成功')
       batchNewRoots.value = []
-      await loadHistoryRoots()
+      await loadGovernanceData()
     } else {
       ElMessage.error(response.data.message || '保存失败')
     }
@@ -2244,7 +2921,7 @@ const saveSingleNewRoots = async () => {
     if (response.data.code === 0) {
       ElMessage.success(response.data.message || '新词根保存成功')
       singleNewRoots.value = []
-      await loadHistoryRoots()
+      await loadGovernanceData()
     } else {
       ElMessage.error(response.data.message || '保存失败')
     }
@@ -2595,19 +3272,170 @@ const processTables = (html) => {
   return result.join('\n')
 }
 
-const loadHistoryRoots = async () => {
+const loadGovernanceData = async () => {
   try {
-    const response = await axios.get('/api/word-roots')
+    const s = await axios.get("/api/standard-roots")
+    const h = await axios.get("/api/historical-roots")
+    standardRoots.value = s.data.code === 0 && Array.isArray(s.data.data) ? s.data.data.map(normalizeRootItem) : []
+    historicalRoots.value = h.data.code === 0 && Array.isArray(h.data.data) ? h.data.data.map(normalizeRootItem) : []
+  } catch (e) {
+    console.error(e)
+    standardRoots.value = []
+    historicalRoots.value = []
+  }
+}
+
+const runGovernance = async () => {
+  if (!llmConfig.apiKey) {
+    ElMessage.warning('请先在基础配置中填写可用的 LLM API Key')
+    return
+  }
+
+  const taskId = window.crypto?.randomUUID?.() || `gov-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  governanceRunning.value = true
+  governanceTaskId.value = taskId
+  governanceStartedAt.value = Date.now()
+  governanceElapsedMs.value = 0
+  governanceStats.rawCount = historicalRoots.value.length
+  governanceStats.preparedCount = 0
+  governanceStats.filteredCount = 0
+  governanceStats.excludedStandardCount = 0
+  governanceStats.standardRootCount = standardRoots.value.length
+  governanceStats.candidateCount = 0
+  governanceStats.promptLength = 0
+  governanceStats.llmElapsedMs = 0
+  governanceStats.chunkCount = 0
+  governanceStats.requestedWorkers = batchMaxWorkers.value
+  governanceStats.actualWorkers = 0
+  governanceStats.completedChunks = 0
+  governanceStats.currentChunk = 0
+  governanceStats.activeChunksText = ''
+  governanceActiveStep.value = 0
+  governanceStatusText.value = '第 1/7 步：加载历史词根'
+  governanceDetailText.value = '正在刷新历史词根与标准词根数据'
+  startGovernanceHeartbeat()
+  try {
+    await loadGovernanceData()
+    governanceStats.rawCount = historicalRoots.value.length
+
+    governanceActiveStep.value = 1
+    governanceStatusText.value = '第 2/7 步：清洗去重'
+    {
+      const filterStats = estimateGovernanceFilterStats(historicalRoots.value, standardRoots.value)
+      governanceStats.preparedCount = filterStats.preparedCount
+      governanceStats.filteredCount = filterStats.filteredCount
+      governanceStats.excludedStandardCount = filterStats.excludedStandardCount
+      governanceStats.standardRootCount = filterStats.standardRootCount
+    }
+    governanceDetailText.value = `已加载 ${governanceStats.rawCount} 条历史词根，去重后 ${governanceStats.preparedCount} 条，剔除标准已存在 ${governanceStats.excludedStandardCount} 条，剩余 ${governanceStats.filteredCount} 条待治理`
+
+    governanceActiveStep.value = 2
+    governanceStatusText.value = '第 3/7 步：构建治理提示词'
+    governanceDetailText.value = `正在为剩余 ${governanceStats.filteredCount} 条待治理词根整理业务域、中文名称、全称词根、缩写词根等上下文`
+
+    governanceActiveStep.value = 3
+    governanceStatusText.value = '第 4/7 步：发送模型请求'
+    governanceDetailText.value = `准备调用模型 ${llmConfig.model} 发起词根治理`
+
+    governanceActiveStep.value = 4
+    governanceStatusText.value = '第 5/7 步：等待模型响应'
+    governanceDetailText.value = '已发出治理请求，正在等待模型返回归并结果'
+    const estimatedChunkCount = governanceStats.filteredCount > 0 ? Math.ceil(governanceStats.filteredCount / 50) : 0
+    governanceStats.chunkCount = estimatedChunkCount
+    governanceStats.actualWorkers = estimatedChunkCount > 0 ? Math.min(estimatedChunkCount, batchMaxWorkers.value) : 0
+    startGovernanceProgressPolling(taskId)
+    const response = await axios.post('/api/governance/run', {
+      llm_config: {
+        api_key: llmConfig.apiKey,
+        api_url: llmConfig.apiUrl,
+        model: llmConfig.model,
+        temperature: llmConfig.temperature,
+        abbr_max_len: llmConfig.abbrMaxLen,
+        industry_context: llmConfig.industryContext || ''
+      },
+      max_workers: batchMaxWorkers.value,
+      task_id: taskId
+    })
+
+    governanceActiveStep.value = 5
+    governanceStatusText.value = '第 6/7 步：解析治理结果'
+    governanceDetailText.value = '模型已返回结果，正在解析 JSON 并标准化字段'
     if (response.data.code === 0) {
-      historyRoots.value = response.data.data
+      governanceCandidates.value = Array.isArray(response.data.data) ? response.data.data.map(item => ({ ...normalizeRootItem(item), governance_status: item.governance_status || '' })) : []
+      governanceActiveStep.value = 6
+      governanceStats.rawCount = response.data.meta?.raw_root_count ?? governanceStats.rawCount
+      governanceStats.preparedCount = response.data.meta?.prepared_root_count ?? governanceStats.preparedCount
+      governanceStats.filteredCount = response.data.meta?.filtered_root_count ?? governanceStats.filteredCount
+      governanceStats.excludedStandardCount = response.data.meta?.excluded_standard_count ?? governanceStats.excludedStandardCount
+      governanceStats.standardRootCount = response.data.meta?.standard_root_count ?? governanceStats.standardRootCount
+      governanceStats.promptLength = response.data.meta?.prompt_length ?? 0
+      governanceStats.candidateCount = response.data.meta?.final_candidate_count ?? governanceCandidates.value.length
+      governanceStats.llmElapsedMs = response.data.meta?.llm_elapsed_ms ?? 0
+      governanceStats.chunkCount = response.data.meta?.chunk_count ?? governanceStats.chunkCount
+      governanceStats.requestedWorkers = response.data.meta?.requested_workers ?? governanceStats.requestedWorkers
+      governanceStats.actualWorkers = response.data.meta?.actual_workers ?? governanceStats.actualWorkers
+      governanceStats.completedChunks = response.data.meta?.chunk_count ?? governanceStats.completedChunks
+      governanceStats.currentChunk = response.data.meta?.chunk_count ?? governanceStats.currentChunk
+      governanceStats.activeChunksText = ''
+      governanceElapsedMs.value = response.data.meta?.elapsed_ms ?? (Date.now() - governanceStartedAt.value)
+      governanceStatusText.value = `治理完成，生成 ${governanceCandidates.value.length} 条候选标准词根`
+      governanceDetailText.value = governanceStats.chunkCount > 0
+        ? `已剔除标准已存在 ${governanceStats.excludedStandardCount} 条，实际治理 ${governanceStats.filteredCount} 条，共 ${governanceStats.chunkCount} 批，并发 ${governanceStats.actualWorkers} 个线程，最终提示词长度 ${governanceStats.promptLength} 字符，模型耗时 ${formatDuration(governanceStats.llmElapsedMs)}`
+        : `历史词根已被现有标准词根覆盖，已剔除 ${governanceStats.excludedStandardCount} 条，无需再调用模型`
+      ElMessage.success(response.data.message || '词根治理完成')
+    } else {
+      governanceStatusText.value = '词根治理失败'
+      governanceDetailText.value = '治理请求已返回，但服务端未生成有效候选结果'
+      ElMessage.error(response.data.message || '词根治理失败')
+    }
+  } catch (error) {
+    governanceStatusText.value = '词根治理失败'
+    governanceDetailText.value = error.response?.data?.detail || error.message || '治理过程中发生异常'
+    ElMessage.error(error.response?.data?.detail || error.message || '词根治理失败')
+  } finally {
+    governanceRunning.value = false
+    governanceElapsedMs.value = Date.now() - governanceStartedAt.value
+    stopGovernanceHeartbeat()
+  }
+}
+
+const applyGovernance = async () => {
+  if (governanceCandidates.value.length === 0) {
+    ElMessage.warning('当前没有可应用的治理结果')
+    return
+  }
+
+  try {
+    const response = await axios.post('/api/governance/apply', governanceCandidates.value)
+    if (response.data.code === 0) {
+      standardRoots.value = Array.isArray(response.data.data) ? response.data.data.map(normalizeRootItem) : []
+      governanceCandidates.value = []
+      await loadGovernanceData()
+      ElMessage.success('治理结果已写入标准词根')
+    } else {
+      ElMessage.error(response.data.message || '应用治理结果失败')
+    }
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || error.message || '应用治理结果失败')
+  }
+}
+
+const loadHistoricalRoots = async () => {
+  try {
+    const response = await axios.get('/api/historical-roots')
+    if (response.data.code === 0) {
+      historicalRoots.value = response.data.data || []
     }
   } catch (error) {
     console.error('加载历史词根失败:', error)
   }
 }
 
-const showAddRootDialog = () => {
+const showAddRootDialog = (target = 'historical') => {
+  addRootTarget.value = target
   addRootDialogVisible.value = true
+  addRootForm.businessDomain = ''
+  addRootForm.domainCode = ''
   addRootForm.chineseName = ''
   addRootForm.fullRoot = ''
   addRootForm.abbrRoot = ''
@@ -2615,64 +3443,92 @@ const showAddRootDialog = () => {
 }
 
 const addRoot = async () => {
-  if (!addRootForm.chineseName || !addRootForm.fullRoot) {
-    ElMessage.warning('请填写中文名称和词根全称')
+  if (!addRootForm.chineseName) {
+    ElMessage.warning('请填写中文名称')
     return
   }
-  const newRoot = {
-    business_domain: '基础通用',
+  const newRoot = normalizeRootItem({
+    business_domain: addRootForm.businessDomain,
+    domain_code: addRootForm.domainCode,
     chinese_name: addRootForm.chineseName,
     full_root: addRootForm.fullRoot,
     abbr_root: addRootForm.abbrRoot,
     recommended_type: addRootForm.recommendedType
-  }
+  })
   try {
-    await axios.post('/api/word-roots', [...historyRoots.value, newRoot])
-    await loadHistoryRoots()
+    if (addRootTarget.value === 'standard') {
+      const mergedRoots = mergeRootLists(standardRoots.value, [newRoot])
+      await saveStandardRoots(mergedRoots, '标准词根添加成功')
+    } else {
+      await axios.post('/api/historical-roots', [...historicalRoots.value, newRoot])
+      await loadGovernanceData()
+      ElMessage.success('词根添加成功')
+    }
     addRootDialogVisible.value = false
-    ElMessage.success('词根添加成功')
   } catch (error) {
     ElMessage.error('添加失败')
   }
 }
 
-const saveHistoryRoots = async () => {
-  if (historyRoots.value.length === 0) {
+const saveHistoricalRoots = async () => {
+  if (historicalRoots.value.length === 0) {
     ElMessage.warning('没有可保存的词根')
     return
   }
   try {
-    await axios.post('/api/word-roots', historyRoots.value)
+    await axios.post('/api/historical-roots', historicalRoots.value)
     ElMessage.success('历史词根保存成功')
   } catch (error) {
     ElMessage.error('保存失败: ' + (error.message || '未知错误'))
   }
 }
 
-const removeRootByRoot = async (root) => {
-  const index = historyRoots.value.findIndex(r => r === root)
+const removeHistoricalRoot = async (root) => {
+  const index = historicalRoots.value.findIndex(r => r === root)
   if (index === -1) return
-  const removed = historyRoots.value.splice(index, 1)[0]
+  const removed = historicalRoots.value.splice(index, 1)[0]
   try {
-    await axios.post('/api/word-roots', historyRoots.value)
+    await axios.post('/api/historical-roots', historicalRoots.value)
   } catch (error) {
-    historyRoots.value.splice(index, 0, removed)
+    historicalRoots.value.splice(index, 0, removed)
     ElMessage.error('删除失败')
   }
 }
 
-const editRoot = (root) => {
-  Object.assign(editingRoot, root)
+const editHistoricalRoot = (root) => {
+  editHistoricalRootIndex.value = historicalRoots.value.findIndex(item => item === root)
+  Object.assign(editingRoot, normalizeRootItem(root))
   editRootDialogVisible.value = true
 }
 
-const saveRootEdit = async () => {
-  const index = historyRoots.value.findIndex(r => r.chinese_name === editingRoot.chinese_name)
+const editStandardRoot = (root) => {
+  const normalized = normalizeRootItem(root)
+  editingStandardRootId.value = normalized.root_id
+  Object.assign(editingStandardRoot, normalized)
+  standardRootEditDialogVisible.value = true
+}
+
+const showStandardRootHistory = (root) => {
+  const normalized = normalizeRootItem(root)
+  currentStandardRootTitle.value = `修改记录 - ${normalized.chinese_name || normalized.full_root || '标准词根'}`
+  currentStandardRootHistory.value = Array.isArray(normalized.change_history)
+    ? [...normalized.change_history].reverse()
+    : []
+  standardRootHistoryDialogVisible.value = true
+}
+
+const saveHistoricalRootEdit = async () => {
+  if (!editingRoot.chinese_name) {
+    ElMessage.warning('中文名称不能为空')
+    return
+  }
+  const index = editHistoricalRootIndex.value
   if (index !== -1) {
-    historyRoots.value[index] = { ...editingRoot }
+    historicalRoots.value[index] = normalizeRootItem(editingRoot)
     try {
-      await axios.post('/api/word-roots', historyRoots.value)
+      await axios.post('/api/historical-roots', historicalRoots.value)
       editRootDialogVisible.value = false
+      editHistoricalRootIndex.value = -1
       ElMessage.success('保存成功')
     } catch (error) {
       ElMessage.error('保存失败')
@@ -2680,20 +3536,54 @@ const saveRootEdit = async () => {
   }
 }
 
-const removeRoot = async (index) => {
-  const removed = historyRoots.value.splice(index, 1)[0]
+const saveStandardRootEdit = async () => {
+  if (!editingStandardRoot.chinese_name) {
+    ElMessage.warning('中文名称不能为空')
+    return
+  }
+  if (!editingStandardRootId.value) {
+    ElMessage.error('标准词根标识缺失')
+    return
+  }
   try {
-    await axios.post('/api/word-roots', historyRoots.value)
+    const payload = normalizeRootItem(editingStandardRoot)
+    const response = await axios.put(`/api/standard-roots/${editingStandardRootId.value}`, payload)
+    if (response.data.code === 0) {
+      const updated = normalizeRootItem(response.data.data || payload)
+      const index = standardRoots.value.findIndex(item => item.root_id === editingStandardRootId.value)
+      if (index !== -1) {
+        standardRoots.value[index] = updated
+      }
+      standardRootEditDialogVisible.value = false
+      await loadGovernanceData()
+      ElMessage.success('标准词根更新成功')
+    } else {
+      ElMessage.error(response.data.message || '标准词根更新失败')
+    }
   } catch (error) {
-    historyRoots.value.splice(index, 0, removed)
-    ElMessage.error('删除失败')
+    ElMessage.error(error.response?.data?.detail || error.response?.data?.message || error.message || '标准词根更新失败')
   }
 }
 
-const clearHistoryRoots = async () => {
+const removeStandardRoot = async (root) => {
+  const normalized = normalizeRootItem(root)
+  if (!normalized.root_id) {
+    ElMessage.error('标准词根标识缺失')
+    return
+  }
   try {
-    await axios.delete('/api/word-roots')
-    historyRoots.value = []
+    await axios.delete(`/api/standard-roots/${normalized.root_id}`)
+    await loadGovernanceData()
+    ElMessage.success('标准词根删除成功')
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || error.response?.data?.message || error.message || '标准词根删除失败')
+  }
+}
+
+const clearHistoricalRoots = async () => {
+  try {
+    await axios.delete('/api/historical-roots')
+    historicalRoots.value = []
     ElMessage.success('历史词根已清除')
   } catch (error) {
     ElMessage.error('清除失败')
@@ -2775,7 +3665,8 @@ const generateDDL = async () => {
           api_url: llmConfig.apiUrl,
           model: llmConfig.model,
           temperature: llmConfig.temperature,
-          abbr_max_len: llmConfig.abbrMaxLen
+          abbr_max_len: llmConfig.abbrMaxLen,
+          industry_context: llmConfig.industryContext || ''
         },
       word_roots_input: {
         type: 'text',
@@ -2831,7 +3722,7 @@ const generateDDL = async () => {
         singleNewRoots.value = []
       }
 
-      await loadHistoryRoots()
+      await loadGovernanceData()
     } else {
       singleNewRoots.value = []
       ElMessage.error(responseData.message || '生成失败')
@@ -2850,12 +3741,18 @@ const generateDDL = async () => {
   }
 }
 
+watch(activeMenu, (menu) => {
+  if (menu === 'governance') {
+    loadGovernanceData()
+  }
+})
+
 onMounted(() => {
   loadConfigs()
-  loadHistoryRoots()
   loadStandards()
   loadHistory()
   loadDbConnections()
+  loadGovernanceData()
 })
 </script>
 
@@ -2983,11 +3880,73 @@ body {
 }
 
 .config-view,
-.ddl-view {
+.ddl-view,
+.governance-view {
   display: flex;
   flex-direction: column;
   gap: 20px;
   animation: fadeIn 0.3s ease;
+}
+
+.governance-panels {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.governance-panel {
+  flex: 1;
+  min-width: 0;
+}
+
+.governance-panel-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #606266;
+  margin-bottom: 8px;
+}
+
+.governance-progress-card {
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.governance-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.governance-progress-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #606266;
+}
+
+.governance-progress-detail {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f4f4f5;
+  color: #303133;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.governance-toolbar {
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.governance-search {
+  width: 220px;
 }
 
 @keyframes fadeIn {
@@ -3340,6 +4299,17 @@ body {
   flex: 1;
   display: flex;
   flex-direction: column;
+}
+
+.generation-mode-switch {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.text-input-card {
+  margin-bottom: 16px;
 }
 
 .standards-view {
@@ -4003,6 +4973,8 @@ body {
 }
 
 </style>
+
+
 
 
 

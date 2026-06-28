@@ -8,6 +8,7 @@ class LLMConfig(BaseModel):
     model: str
     temperature: Optional[float] = 0.3
     abbr_max_len: int = Field(default=4, ge=1, le=12)
+    industry_context: Optional[str] = ""
 
 
 class TextInput(BaseModel):
@@ -35,6 +36,17 @@ class GenerateDDLResponse(BaseModel):
     violations: Optional[List[dict]] = []
 
 
+class TextGenerateTaskRequest(BaseModel):
+    llm_config: LLMConfig
+    description: str
+    db_type: Literal["mysql", "postgresql", "oracle"]
+    custom_prompt: str = ""
+    root_match_priority: Literal["full", "abbr"] = "abbr"
+    cut_mode: Literal["accurate", "full", "search"] = "accurate"
+    enable_validation: bool = True
+    task_id: Optional[str] = None
+
+
 class TestConnectionRequest(BaseModel):
     api_key: str
     api_url: str
@@ -58,6 +70,12 @@ class DbConnectionRequest(BaseModel):
 
 class ExecuteDDLRequest(BaseModel):
     connection_id: str
+
+
+class GovernanceRequest(BaseModel):
+    llm_config: LLMConfig
+    max_workers: int = Field(default=5, ge=1, le=10)
+    task_id: Optional[str] = None
 
 
 class WordRootItem(BaseModel):

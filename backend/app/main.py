@@ -1,5 +1,7 @@
-﻿import asyncio
+import asyncio
 import base64
+import csv
+import hashlib
 import io
 import json
 import re
@@ -8,6 +10,7 @@ import logging
 import traceback
 import uuid
 import threading
+from functools import partial
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
 from fastapi import FastAPI, UploadFile, File, HTTPException, Body, Form, Request
@@ -25,6 +28,8 @@ executor = ThreadPoolExecutor(max_workers=10)
 
 cache_lock = threading.Lock()
 roots_lock = threading.Lock()
+governance_progress_lock = threading.Lock()
+governance_progress_store: Dict[str, Dict[str, Any]] = {}
 
 import sys
 import os
@@ -34,10 +39,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.models import (
     GenerateDDLRequest,
     GenerateDDLResponse,
+    TextGenerateTaskRequest,
     TestConnectionRequest,
     TestConnectionResponse,
     WordRootsResponse,
     WordRootItem,
+    GovernanceRequest,
     DbConnectionRequest,
     ExecuteDDLRequest
 )
@@ -46,6 +53,30 @@ from app.native_db_executor import execute_native_ddl, test_native_connection
 
 from app.validators.ddl_validator import DDLValidator
 from app.config.db_examples import get_db_example
+from app.root_governance import (
+    load_standard_roots,
+    normalize_standard_root_record,
+    save_standard_roots,
+    load_historical_roots,
+    save_historical_roots,
+    load_effective_historical_roots,
+    save_effective_historical_roots,
+    add_to_historical_roots,
+    format_standard_roots_for_prompt,
+    migrate_from_legacy,
+    build_governance_prompt,
+    build_governance_merge_prompt,
+    chunk_roots_for_governance,
+    dedupe_governed_roots,
+    GOVERNANCE_CHUNK_SIZE,
+    GOVERNANCE_MERGE_CHUNK_SIZE,
+    prepare_historical_roots_for_governance,
+    filter_historical_roots_against_standard,
+    apply_governance_result,
+    enrich_standard_roots_with_historical_types,
+    BUSINESS_DOMAINS,
+)
+
 from app.root_policy import (
     DEFAULT_ABBR_MAX_LEN,
     get_root_constraints,
@@ -119,7 +150,7 @@ task_cancel_flags = {}  # 任务终止标志
 
 def update_progress(task_id, current, total, table_name=None, stage=None, matched_count=None,
                     unmatched_count=None, total_fields=None, enable_validation=None,
-                    field_progress=None):
+                    field_progress=None, source_label=None):
     """
     更新任务进度
     
@@ -156,10 +187,13 @@ def update_progress(task_id, current, total, table_name=None, stage=None, matche
     if enable_validation is None:
         enable_validation = task_validation_flags.get(task_id, False)
 
+    existing_data = progress_store.get(task_id, {})
+    step1_title = source_label or existing_data.get('source_label') or "解析Excel"
+
     milestones = [
         {
             "step": 1,
-            "title": "解析Excel",
+            "title": step1_title,
             "icon": "[1/8]",
             "status": "completed" if current >= 1 else "pending"
         },
@@ -236,9 +270,6 @@ def update_progress(task_id, current, total, table_name=None, stage=None, matche
                 if m["step"] == 7:
                     m["sub_progress"] = stage
     
-    # 获取现有的进度数据（如果存在），保留之前设置的统计信息
-    existing_data = progress_store.get(task_id, {})
-    
     progress_data = {
         'current': current,
         'total': total,
@@ -247,6 +278,10 @@ def update_progress(task_id, current, total, table_name=None, stage=None, matche
         'milestones': milestones,
         'overall_progress': int((current / total) * 100)
     }
+    if source_label:
+        progress_data['source_label'] = source_label
+    elif 'source_label' in existing_data:
+        progress_data['source_label'] = existing_data['source_label']
     
     # 从现有数据中保留统计信息，除非明确提供了新值
     if matched_count is not None:
@@ -382,6 +417,8 @@ USER_PROMPT_TEMPLATE = """你是一位数据仓库专家。请根据以下参考
 【建表需求】
 {description}
 
+{industry_context_block}
+
 【词根参考】
 {word_roots_content}
 
@@ -408,6 +445,8 @@ TABLE_NAME_PROMPT = """
 【任务】根据以下信息生成符合规范的英文表名，不要有思考和任何解释过程
 
 【中文表名】{chinese_table_name}
+
+{industry_context_block}
 
 【开发规范】
 {standards_content}
@@ -449,6 +488,30 @@ def append_root_mode_constraints(prompt: str, root_constraints: str, root_reuse_
 {root_constraints}
 {root_reuse_principle}
 """
+
+
+def normalize_industry_context(industry_context: Optional[str]) -> str:
+    return str(industry_context or "").strip()
+
+
+def build_industry_context_block(industry_context: Optional[str]) -> str:
+    normalized = normalize_industry_context(industry_context)
+    if not normalized:
+        return ""
+    return f"【行业背景】\n{normalized}"
+
+
+def merge_standards_with_industry(standards_content: str, industry_context: Optional[str]) -> str:
+    normalized = normalize_industry_context(industry_context)
+    standards_text = str(standards_content or "").strip()
+    if not normalized:
+        return standards_text
+    industry_block = f"## 行业背景\n{normalized}"
+    if industry_block in standards_text:
+        return standards_text
+    if not standards_text:
+        return industry_block
+    return f"{standards_text}\n\n{industry_block}"
 
 
 def get_system_prompt() -> str:
@@ -961,6 +1024,20 @@ MAX_ROOTS_PER_REQUEST = 50
 COMMON_ROOTS_COUNT = 20
 
 requests_session = requests.Session()
+
+
+def set_governance_progress(task_id: Optional[str], **updates):
+    if not task_id:
+        return
+    with governance_progress_lock:
+        state = governance_progress_store.setdefault(task_id, {})
+        state.update(updates)
+        state["updated_at"] = datetime.now().isoformat()
+
+
+def get_governance_progress(task_id: str) -> Dict[str, Any]:
+    with governance_progress_lock:
+        return dict(governance_progress_store.get(task_id, {}))
 requests_session.headers.update({'Content-Type': 'application/json'})
 requests_session.timeout = 300
 requests_session.keep_alive = True
@@ -968,31 +1045,74 @@ requests_session.proxies = {"http": None, "https": None}
 requests_session.trust_env = False
 
 
+def log_governance_event(
+    event: str,
+    *,
+    task_id: Optional[str] = None,
+    phase: Optional[str] = None,
+    chunk_index: Optional[int] = None,
+    total_chunks: Optional[int] = None,
+    merge_round: Optional[int] = None,
+    prompt_kind: Optional[str] = None,
+    prompt_length: Optional[int] = None,
+    prompt_hash: Optional[str] = None,
+    item_count: Optional[int] = None,
+    result_count: Optional[int] = None,
+    elapsed_ms: Optional[int] = None,
+    retry_count: Optional[int] = None,
+    extra: Optional[Dict[str, Any]] = None,
+):
+    details = [f"event={event}"]
+    if task_id:
+        details.append(f"task_id={task_id}")
+    if phase:
+        details.append(f"phase={phase}")
+    if chunk_index is not None and total_chunks is not None:
+        details.append(f"chunk={chunk_index}/{total_chunks}")
+    elif chunk_index is not None:
+        details.append(f"chunk={chunk_index}")
+    if merge_round is not None:
+        details.append(f"merge_round={merge_round}")
+    if prompt_kind:
+        details.append(f"prompt_kind={prompt_kind}")
+    if prompt_length is not None:
+        details.append(f"prompt_chars={prompt_length}")
+    if prompt_hash:
+        details.append(f"prompt_hash={prompt_hash}")
+    if item_count is not None:
+        details.append(f"item_count={item_count}")
+    if result_count is not None:
+        details.append(f"result_count={result_count}")
+    if elapsed_ms is not None:
+        details.append(f"elapsed_ms={elapsed_ms}")
+    if retry_count is not None:
+        details.append(f"retry_count={retry_count}")
+    if extra:
+        for key, value in extra.items():
+            details.append(f"{key}={value}")
+    logger.info("【词根治理】%s", ", ".join(details))
+
+
 def load_word_roots() -> list:
-    logger.info(f"加载词根文件: {WORD_ROOTS_FILE}")
-    if os.path.exists(WORD_ROOTS_FILE):
-        try:
-            with open(WORD_ROOTS_FILE, 'r', encoding='utf-8-sig') as f:
-                data = json.load(f)
-                logger.info(f"成功加载 {len(data)} 条词根记录")
-                return data
-        except Exception as e:
-            logger.error(f"加载词根文件失败: {e}")
-            return []
-    logger.info("词根文件不存在，返回空列表")
-    return []
-
-
-def save_word_roots(roots: list):
-    logger.info(f"保存词根文件: {WORD_ROOTS_FILE}，共 {len(roots)} 条记录")
+    """Load roots used by DDL generation; never fall back to legacy word_roots.json."""
     try:
-        with open(WORD_ROOTS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(roots, f, ensure_ascii=False, indent=2)
-        logger.info("词根文件保存成功")
+        roots = load_standard_roots()
+        logger.info(f"加载标准词根文件，共 {len(roots)} 条")
+        return roots
     except Exception as e:
-        logger.error(f"保存词根文件失败: {e}")
+        logger.error(f"加载标准词根失败: {e}")
+        return []
 
 
+def load_legacy_word_roots_for_governance() -> list:
+    """Load historical roots for governance from the canonical governance source."""
+    roots = load_effective_historical_roots()
+    logger.info(f"加载治理历史词根，共 {len(roots)} 条")
+    return roots
+def save_word_roots(roots: list):
+    """save to standard_roots"""
+    save_standard_roots(roots)
+    logger.info(f"saved {len(roots)} standard roots")
 def merge_and_save_roots(new_roots: list):
     logger.info(f"合并新词根: {len(new_roots)} 条")
     existing = load_word_roots()
@@ -1094,27 +1214,8 @@ def get_common_roots(roots: list, count: int = 20) -> List[dict]:
 
 
 def format_word_roots_for_prompt(roots: list, priority: str = 'full') -> str:
-    if not roots:
-        return "无"
-
-    lines = []
-    for root in roots:
-        chinese_name = root.get('chinese_name', '')
-        full_root = root.get('full_root', '')
-        abbr_root = root.get('abbr_root', '')
-        recommended_type = root.get('recommended_type', '')
-
-        if priority == 'abbr':
-            # 缩写模式：只显示缩写，不显示全称避免LLM混用
-            parts = [abbr_root, chinese_name, recommended_type]
-        else:
-            # 全称模式：只显示全称，不显示缩写避免LLM用缩写
-            parts = [full_root, chinese_name, recommended_type]
-        lines.append(":".join(parts))
-
-    return "\n".join(lines)
-
-
+    """delegate to root_governance"""
+    return format_standard_roots_for_prompt(roots, priority)
 def parse_word_roots_text(text: str) -> list:
     logger.info("解析文本格式词根")
     roots = []
@@ -1124,13 +1225,30 @@ def parse_word_roots_text(text: str) -> list:
             continue
 
         parts = line.replace('：', ':').split(':')
-        if len(parts) >= 2:
-            chinese_name = parts[0].strip()
-            full_root = parts[1].strip()
-            abbr_root = parts[2].strip() if len(parts) > 2 else ''
-            recommended_type = parts[3].strip() if len(parts) > 3 else ''
+        if len(parts) >= 1:
+            values = [part.strip() for part in parts]
+            business_domain = ''
+            domain_code = ''
+            chinese_name = ''
+            full_root = ''
+            abbr_root = ''
+            recommended_type = ''
+
+            if len(values) >= 6:
+                business_domain, domain_code, chinese_name, full_root, abbr_root, recommended_type = values[:6]
+            elif len(values) >= 4:
+                chinese_name, full_root, abbr_root, recommended_type = values[:4]
+            elif len(values) >= 2:
+                chinese_name, full_root = values[:2]
+                abbr_root = values[2] if len(values) > 2 else ''
+                recommended_type = values[3] if len(values) > 3 else ''
+
+            if not chinese_name:
+                continue
+
             roots.append({
-                'business_domain': '基础通用',
+                'business_domain': business_domain,
+                'domain_code': domain_code,
                 'chinese_name': chinese_name,
                 'full_root': full_root,
                 'abbr_root': abbr_root,
@@ -1149,14 +1267,18 @@ def parse_excel_content(file_content: bytes) -> list:
         for row_num, row in enumerate(ws.iter_rows(values_only=True), 1):
             if row_num == 1:
                 continue
-            if row and len(row) >= 3:
-                business_domain = str(row[0]).strip() if row[0] else '基础通用'
-                chinese_name = str(row[1]).strip() if row[1] else ''
-                full_root = str(row[2]).strip() if row[2] else ''
-                abbr_root = str(row[3]).strip() if row[3] else ''
-                recommended_type = str(row[4]).strip() if row[4] else ''
+            if row and len(row) >= 1:
+                business_domain = str(row[0]).strip() if len(row) > 0 and row[0] else ''
+                domain_code = str(row[1]).strip() if len(row) > 1 and row[1] else ''
+                chinese_name = str(row[2]).strip() if len(row) > 2 and row[2] else ''
+                full_root = str(row[3]).strip() if len(row) > 3 and row[3] else ''
+                abbr_root = str(row[4]).strip() if len(row) > 4 and row[4] else ''
+                recommended_type = str(row[5]).strip() if len(row) > 5 and row[5] else ''
+                if not chinese_name:
+                    continue
                 roots.append({
-                    'business_domain': business_domain if business_domain else '基础通用',
+                    'business_domain': business_domain,
+                    'domain_code': domain_code,
                     'chinese_name': chinese_name,
                     'full_root': full_root,
                     'abbr_root': abbr_root,
@@ -1199,6 +1321,35 @@ def parse_csv_content(file_content: bytes) -> str:
     except UnicodeDecodeError:
         text = file_content.decode("gbk")
     return text
+
+
+def parse_csv_roots(file_content: bytes) -> list:
+    text = parse_csv_content(file_content)
+    reader = csv.reader(io.StringIO(text))
+    roots = []
+    for row_num, row in enumerate(reader, 1):
+        if row_num == 1:
+            continue
+        values = [str(cell).strip() if cell is not None else '' for cell in row]
+        if not any(values):
+            continue
+        business_domain = values[0] if len(values) > 0 else ''
+        domain_code = values[1] if len(values) > 1 else ''
+        chinese_name = values[2] if len(values) > 2 else ''
+        full_root = values[3] if len(values) > 3 else ''
+        abbr_root = values[4] if len(values) > 4 else ''
+        recommended_type = values[5] if len(values) > 5 else ''
+        if not chinese_name:
+            continue
+        roots.append({
+            'business_domain': business_domain,
+            'domain_code': domain_code,
+            'chinese_name': chinese_name,
+            'full_root': full_root,
+            'abbr_root': abbr_root,
+            'recommended_type': recommended_type,
+        })
+    return roots
 
 
 def filter_and_prepare_roots(description: str, priority: str = 'full') -> Tuple[list, str]:
@@ -1411,8 +1562,12 @@ def extract_llm_content(result: dict) -> str:
     choices = result.get("choices") or []
     if not choices:
         return ""
-    message = choices[0].get("message") or {}
+    choice = choices[0] or {}
+    message = choice.get("message") or {}
+    delta = choice.get("delta") or {}
     content = message.get("content")
+    if not content:
+        content = delta.get("content")
     if isinstance(content, list):
         content = "\n".join(
             item.get("text", "") if isinstance(item, dict) else str(item)
@@ -1427,6 +1582,536 @@ def extract_llm_content(result: dict) -> str:
     if reasoning:
         logger.warning("LLM returned reasoning_content but no final content; treating response as empty")
     return ""
+
+
+def extract_json_array_from_text(text: str) -> list:
+    if not text:
+        return []
+
+    cleaned = re.sub(r"```json\s*", "", text, flags=re.IGNORECASE).replace("```", "").strip()
+    try:
+        parsed = json.loads(cleaned)
+        return parsed if isinstance(parsed, list) else []
+    except Exception:
+        pass
+
+    start = cleaned.find('[')
+    end = cleaned.rfind(']')
+    if start == -1 or end == -1 or end <= start:
+        return []
+
+    snippet = cleaned[start:end + 1]
+    try:
+        parsed = json.loads(snippet)
+        return parsed if isinstance(parsed, list) else []
+    except Exception:
+        logger.warning("治理结果 JSON 解析失败")
+        return []
+
+
+def extract_json_object_from_text(text: str) -> dict:
+    if not text:
+        return {}
+
+    cleaned = re.sub(r"```json\s*", "", text, flags=re.IGNORECASE).replace("```", "").strip()
+    if not cleaned:
+        return {}
+
+    try:
+        parsed = json.loads(cleaned)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        pass
+
+    start = cleaned.find('{')
+    end = cleaned.rfind('}')
+    if start == -1 or end == -1 or end <= start:
+        return {}
+
+    snippet = cleaned[start:end + 1]
+    try:
+        parsed = json.loads(snippet)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        logger.warning("结构化表定义 JSON 解析失败")
+        return {}
+
+
+def extract_governance_objects_from_text(text: str) -> list:
+    if not text:
+        return []
+
+    cleaned = re.sub(r"```json\s*", "", text, flags=re.IGNORECASE).replace("```", "").strip()
+    if not cleaned:
+        return []
+
+    def _extract_from_parsed(parsed_value) -> list:
+        if isinstance(parsed_value, dict):
+            if "choices" in parsed_value:
+                nested_text = extract_llm_content(parsed_value)
+                if nested_text:
+                    return extract_governance_objects_from_text(nested_text)
+            if (
+                parsed_value.get("domain_code")
+                or parsed_value.get("business_domain")
+                or parsed_value.get("chinese_name")
+                or parsed_value.get("full_root")
+                or parsed_value.get("abbr_root")
+            ):
+                return [parsed_value]
+            return []
+        if isinstance(parsed_value, list):
+            extracted = []
+            for item in parsed_value:
+                if isinstance(item, dict):
+                    extracted.extend(_extract_from_parsed(item))
+            return extracted
+        return []
+
+    try:
+        parsed = json.loads(cleaned)
+        extracted = _extract_from_parsed(parsed)
+        if extracted:
+            return extracted
+    except Exception:
+        pass
+
+    objects = []
+    decoder = json.JSONDecoder()
+    index = 0
+    while index < len(cleaned):
+        while index < len(cleaned) and cleaned[index] not in '{[':
+            index += 1
+        if index >= len(cleaned):
+            break
+        try:
+            parsed, end = decoder.raw_decode(cleaned[index:])
+        except Exception:
+            index += 1
+            continue
+        objects.extend(_extract_from_parsed(parsed))
+        index += max(end, 1)
+
+    return objects
+
+
+def extract_governance_objects_from_response(response) -> list:
+    response_text = ""
+
+    if hasattr(response, "iter_lines"):
+        try:
+            response.encoding = "utf-8"
+        except Exception:
+            pass
+        streamed_chunks = []
+        try:
+            for raw_line in response.iter_lines(decode_unicode=True):
+                if raw_line is None:
+                    continue
+                line = str(raw_line).strip()
+                if not line:
+                    continue
+                if line.startswith("data:"):
+                    line = line[5:].strip()
+                if line == "[DONE]":
+                    break
+                if line.startswith("{") and line.endswith("}"):
+                    try:
+                        chunk_obj = json.loads(line)
+                        content = extract_llm_content(chunk_obj)
+                        if content:
+                            streamed_chunks.append(content)
+                        continue
+                    except Exception:
+                        pass
+                streamed_chunks.append(line)
+        except Exception as e:
+            logger.warning("治理流式读取失败，回退到完整响应: %s", e)
+        response_text = "\n".join(piece for piece in streamed_chunks if piece)
+
+    if not response_text:
+        try:
+            response.encoding = "utf-8"
+        except Exception:
+            pass
+        if hasattr(response, "json"):
+            try:
+                payload = response.json()
+                response_text = extract_llm_content(payload)
+            except Exception:
+                response_text = ""
+        if not response_text:
+            try:
+                response_text = response.text or ""
+            except Exception:
+                response_text = ""
+
+    return extract_governance_objects_from_text(response_text)
+
+
+def governance_error_response(detail: str, status_code: int = 500) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "code": 1,
+            "message": detail,
+            "detail": detail,
+        },
+    )
+
+
+def normalize_governed_root(root: dict) -> dict:
+    domain_code = str(root.get('domain_code') or 'pub').strip().lower()
+    if domain_code not in BUSINESS_DOMAINS:
+        domain_code = 'pub'
+
+    business_domain = str(root.get('business_domain') or BUSINESS_DOMAINS.get(domain_code, '通用')).strip()
+    chinese_name = str(root.get('chinese_name') or '').strip()
+    full_root = str(root.get('full_root') or '').strip()
+    abbr_root = str(root.get('abbr_root') or '').strip()
+    recommended_type = str(root.get('recommended_type') or '').strip()
+    governance_status = str(root.get('governance_status') or 'governed').strip()
+    merged_from = root.get('merged_from') if isinstance(root.get('merged_from'), list) else []
+
+    return {
+        'domain_code': domain_code,
+        'business_domain': business_domain,
+        'chinese_name': chinese_name,
+        'full_root': full_root,
+        'abbr_root': abbr_root,
+        'recommended_type': recommended_type,
+        'governance_status': governance_status,
+        'merged_from': merged_from,
+    }
+
+
+def run_governance_llm_round(
+    *,
+    phase_label: str,
+    api_url: str,
+    api_key: str,
+    model: str,
+    temperature: float,
+    prompt: str,
+    timeout_seconds: int,
+    prompt_kind: str,
+    task_id: Optional[str] = None,
+    chunk_index: Optional[int] = None,
+    total_chunks: Optional[int] = None,
+    merge_round: Optional[int] = None,
+    item_count: Optional[int] = None,
+) -> dict:
+    llm_url = build_llm_url(api_url)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": get_system_prompt()},
+            {"role": "user", "content": prompt},
+        ],
+        "max_tokens": 4096,
+        "temperature": temperature,
+    }
+    payload = add_deepseek_thinking_body(api_url, payload)
+    prompt_length = len(prompt)
+    prompt_lines = prompt.count("\n") + 1 if prompt else 0
+    prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16] if prompt else ""
+    payload_length = len(json.dumps(payload, ensure_ascii=False))
+    logger.info(
+        "%s请求准备: llm_url=%s, model=%s, temperature=%s, timeout=%ss, prompt_kind=%s, prompt_chars=%s, prompt_lines=%s, prompt_hash=%s, payload_chars=%s",
+        phase_label,
+        llm_url,
+        model,
+        temperature,
+        timeout_seconds,
+        prompt_kind,
+        prompt_length,
+        prompt_lines,
+        prompt_hash,
+        payload_length,
+    )
+    log_governance_event(
+        "llm_request_prepared",
+        task_id=task_id,
+        phase=phase_label,
+        chunk_index=chunk_index,
+        total_chunks=total_chunks,
+        merge_round=merge_round,
+        prompt_kind=prompt_kind,
+        prompt_length=prompt_length,
+        prompt_hash=prompt_hash,
+        item_count=item_count,
+        extra={
+            "model": model,
+            "timeout_s": timeout_seconds,
+            "payload_chars": payload_length,
+            "temperature": temperature,
+        },
+    )
+    started_at = datetime.now()
+    try:
+        response = requests.post(
+            llm_url,
+            headers=headers,
+            json=payload,
+            timeout=timeout_seconds,
+            stream=True,
+        )
+        llm_elapsed_ms = int((datetime.now() - started_at).total_seconds() * 1000)
+        objects = extract_governance_objects_from_response(response)
+        response_text_length = 0
+        logger.info(
+            "%s上游响应: status=%s, elapsed_ms=%s, response_items=%s",
+            phase_label,
+            response.status_code,
+            llm_elapsed_ms,
+            len(objects),
+        )
+        log_governance_event(
+            "llm_response_received",
+            task_id=task_id,
+            phase=phase_label,
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
+            merge_round=merge_round,
+            prompt_kind=prompt_kind,
+            prompt_length=prompt_length,
+            prompt_hash=prompt_hash,
+            item_count=item_count,
+            result_count=len(objects),
+            elapsed_ms=llm_elapsed_ms,
+            extra={"status_code": response.status_code},
+        )
+        if response.status_code != 200:
+            detail = ""
+            try:
+                detail = response.text[:500] if response.text else ""
+            except Exception:
+                detail = ""
+            logger.error("%s失败: HTTP %s %s", phase_label, response.status_code, detail)
+            log_governance_event(
+                "llm_http_error",
+                task_id=task_id,
+                phase=phase_label,
+                chunk_index=chunk_index,
+                total_chunks=total_chunks,
+                merge_round=merge_round,
+                prompt_kind=prompt_kind,
+                prompt_length=prompt_length,
+                prompt_hash=prompt_hash,
+                item_count=item_count,
+                elapsed_ms=llm_elapsed_ms,
+                extra={"status_code": response.status_code, "detail_preview": detail[:120]},
+            )
+            return {
+                "ok": False,
+                "message": f"词根治理失败: HTTP {response.status_code}",
+                "stage": phase_label,
+                "prompt_kind": prompt_kind,
+                "prompt_length": prompt_length,
+                "llm_elapsed_ms": llm_elapsed_ms,
+                "llm_url": llm_url,
+            }
+        normalized = [
+            normalize_governed_root(item)
+            for item in objects
+            if isinstance(item, dict) and (item.get("full_root") or item.get("abbr_root") or item.get("chinese_name"))
+        ]
+        if not normalized:
+            logger.error("%s返回为空或无法解析为 JSON 数组", phase_label)
+            log_governance_event(
+                "llm_empty_or_unparsed",
+                task_id=task_id,
+                phase=phase_label,
+                chunk_index=chunk_index,
+                total_chunks=total_chunks,
+                merge_round=merge_round,
+                prompt_kind=prompt_kind,
+                prompt_length=prompt_length,
+                prompt_hash=prompt_hash,
+                item_count=item_count,
+                elapsed_ms=llm_elapsed_ms,
+            )
+            return {
+                "ok": False,
+                "message": "词根治理失败: 模型返回为空或结果无法解析",
+                "stage": phase_label,
+                "prompt_kind": prompt_kind,
+                "prompt_length": prompt_length,
+                "llm_elapsed_ms": llm_elapsed_ms,
+                "llm_url": llm_url,
+            }
+
+        log_governance_event(
+            "llm_round_succeeded",
+            task_id=task_id,
+            phase=phase_label,
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
+            merge_round=merge_round,
+            prompt_kind=prompt_kind,
+            prompt_length=prompt_length,
+            prompt_hash=prompt_hash,
+            item_count=item_count,
+            result_count=len(normalized),
+            elapsed_ms=llm_elapsed_ms,
+        )
+        return {
+            "ok": True,
+            "data": normalized,
+            "stage": phase_label,
+            "prompt_kind": prompt_kind,
+            "prompt_length": prompt_length,
+            "prompt_lines": prompt_lines,
+            "prompt_hash": prompt_hash,
+            "llm_elapsed_ms": llm_elapsed_ms,
+            "llm_url": llm_url,
+        }
+    except requests.exceptions.ReadTimeout as e:
+        logger.error(
+            "%s超时: %s | model=%s | api_url=%s | llm_url=%s | prompt_chars=%s | prompt_hash=%s",
+            phase_label,
+            e,
+            model,
+            api_url,
+            llm_url,
+            prompt_length,
+            prompt_hash,
+        )
+        log_governance_event(
+            "llm_timeout",
+            task_id=task_id,
+            phase=phase_label,
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
+            merge_round=merge_round,
+            prompt_kind=prompt_kind,
+            prompt_length=prompt_length,
+            prompt_hash=prompt_hash,
+            item_count=item_count,
+            extra={"error": str(e)},
+        )
+        return {
+            "ok": False,
+            "message": "词根治理失败: 上游模型响应超时，请稍后重试或减少词根规模",
+            "stage": phase_label,
+            "prompt_kind": prompt_kind,
+            "prompt_length": prompt_length,
+            "llm_url": llm_url,
+        }
+    except requests.exceptions.RequestException as e:
+        logger.error(
+            "%s请求异常: %s | model=%s | api_url=%s | llm_url=%s | prompt_chars=%s | prompt_hash=%s",
+            phase_label,
+            e,
+            model,
+            api_url,
+            llm_url,
+            prompt_length,
+            prompt_hash,
+        )
+        log_governance_event(
+            "llm_request_exception",
+            task_id=task_id,
+            phase=phase_label,
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
+            merge_round=merge_round,
+            prompt_kind=prompt_kind,
+            prompt_length=prompt_length,
+            prompt_hash=prompt_hash,
+            item_count=item_count,
+            extra={"error": str(e)},
+        )
+        return {
+            "ok": False,
+            "message": f"词根治理失败: {str(e)}",
+            "stage": phase_label,
+            "prompt_kind": prompt_kind,
+            "prompt_length": prompt_length,
+            "llm_url": llm_url,
+        }
+    except ValueError as e:
+        logger.error(
+            "%s结果解析失败: %s | model=%s | api_url=%s | llm_url=%s | prompt_hash=%s",
+            phase_label,
+            e,
+            model,
+            api_url,
+            llm_url,
+            prompt_hash,
+        )
+        log_governance_event(
+            "llm_parse_error",
+            task_id=task_id,
+            phase=phase_label,
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
+            merge_round=merge_round,
+            prompt_kind=prompt_kind,
+            prompt_hash=prompt_hash,
+            item_count=item_count,
+            extra={"error": str(e)},
+        )
+        return {
+            "ok": False,
+            "message": "词根治理失败: 模型返回内容无法解析",
+            "stage": phase_label,
+            "prompt_kind": prompt_kind,
+            "prompt_length": prompt_length,
+            "llm_url": llm_url,
+        }
+    except Exception as e:
+        logger.exception(
+            "%s未知异常 | model=%s | api_url=%s | llm_url=%s | prompt_chars=%s | prompt_hash=%s",
+            phase_label,
+            model,
+            api_url,
+            llm_url,
+            prompt_length,
+            prompt_hash,
+        )
+        log_governance_event(
+            "llm_unknown_exception",
+            task_id=task_id,
+            phase=phase_label,
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
+            merge_round=merge_round,
+            prompt_kind=prompt_kind,
+            prompt_length=prompt_length,
+            prompt_hash=prompt_hash,
+            item_count=item_count,
+            extra={"error": str(e)},
+        )
+        return {
+            "ok": False,
+            "message": f"词根治理失败: {str(e)}",
+            "stage": phase_label,
+            "prompt_kind": prompt_kind,
+            "prompt_length": prompt_length,
+            "llm_url": llm_url,
+        }
+
+
+def run_governance_chunk(index: int, total_chunks: int, req: GovernanceRequest, prompt: str) -> Tuple[int, dict]:
+    result = run_governance_llm_round(
+        phase_label=f"词根治理分批 {index}/{total_chunks}",
+        api_url=req.llm_config.api_url,
+        api_key=req.llm_config.api_key,
+        model=req.llm_config.model,
+        temperature=req.llm_config.temperature or 0.3,
+        prompt=prompt,
+        timeout_seconds=600,
+        prompt_kind="chunk",
+        task_id=req.task_id,
+        chunk_index=index,
+        total_chunks=total_chunks,
+    )
+    return index, result
 
 def build_llm_url(api_url: str) -> str:
     """构建LLM请求URL，避免重复拼接/chat/completions"""
@@ -1673,12 +2358,14 @@ async def generate_ddl(req: GenerateDDLRequest):
     step3_start = datetime.now()
     
     standards = load_standards()
-    standards_content = standards.get('content', '')
+    industry_context = normalize_industry_context(req.llm_config.industry_context)
+    standards_content = merge_standards_with_industry(standards.get('content', ''), industry_context)
     
     root_match_name = {'full': '全称', 'abbr': '缩写'}.get(req.root_match_priority, req.root_match_priority)
     
     db_example_config = get_db_example(req.db_type, req.root_match_priority)
     db_example = f"表名格式: {db_example_config['table_format']}\n\n示例DDL:\n{db_example_config['example']}"
+    industry_context_block = build_industry_context_block(industry_context)
     
     root_constraints = get_root_constraints(req.root_match_priority, abbr_max_len)
     root_reuse_principle = get_root_reuse_principle(req.root_match_priority, abbr_max_len)
@@ -1701,6 +2388,8 @@ async def generate_ddl(req: GenerateDDLRequest):
             prompt = req.custom_prompt.format(
                 word_roots_content=word_roots_content,
                 description=req.description,
+                industry_context=industry_context,
+                industry_context_block=industry_context_block,
                 db_type=db_type_name,
                 root_match_priority=root_match_name,
                 standards_content=standards_content,
@@ -1710,18 +2399,19 @@ async def generate_ddl(req: GenerateDDLRequest):
             )
         except KeyError:
             logger.warning("自定义提示词中缺少必要的占位符，将附加建表需求")
-            prompt = f"{req.custom_prompt}\n\n【建表需求】\n{req.description}\n\n【数据库类型】\n{db_type_name}\n{db_example}\n\n【词根参考】\n{word_roots_content}"
+            prompt = f"{req.custom_prompt}\n\n【建表需求】\n{req.description}\n\n{industry_context_block}\n\n【数据库类型】\n{db_type_name}\n{db_example}\n\n【词根参考】\n{word_roots_content}"
         
         # 检查提示词是否包含建表需求信息，如果没有则添加
         if req.description and req.description not in prompt:
             logger.info("自定义提示词中未包含建表需求，自动附加")
-            prompt = f"{req.custom_prompt}\n\n【建表需求】\n{req.description}\n\n【数据库类型】\n{db_type_name}\n{db_example}\n\n【词根参考】\n{word_roots_content}"
+            prompt = f"{req.custom_prompt}\n\n【建表需求】\n{req.description}\n\n{industry_context_block}\n\n【数据库类型】\n{db_type_name}\n{db_example}\n\n【词根参考】\n{word_roots_content}"
         prompt = append_root_mode_constraints(prompt, root_constraints, root_reuse_principle)
     else:
         logger.info("使用默认提示词")
         prompt = USER_PROMPT_TEMPLATE.format(
             word_roots_content=word_roots_content,
             description=req.description,
+            industry_context_block=industry_context_block,
             db_type=db_type_name,
             root_match_priority=root_match_name,
             standards_content=standards_content,
@@ -1975,9 +2665,10 @@ async def parse_file(file: UploadFile = File(...), parse_type: str = Form("auto"
         elif filename.endswith(".docx"):
             parsed = parse_docx_content(content)
         elif filename.endswith(".csv"):
-            parsed = parse_csv_content(content)
+            parsed = parse_csv_roots(content) if parse_type == "roots" else parse_csv_content(content)
         elif filename.endswith(".txt"):
-            parsed = content.decode("utf-8")
+            text = content.decode("utf-8")
+            parsed = parse_word_roots_text(text) if parse_type == "roots" else text
         else:
             raise HTTPException(status_code=400, detail="不支持的文件类型")
 
@@ -1994,16 +2685,16 @@ async def download_template():
     ws = wb.active
     ws.title = "词根模板"
 
-    headers = ["词根业务域", "中文名称", "词根全称", "缩写词根", "推荐字段类型"]
+    headers = ["业务域", "域编码", "中文名称", "全称词根", "缩写词根", "推荐类型"]
     for col_num, header in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col_num)
         cell.value = header
         cell.font = openpyxl.styles.Font(bold=True)
 
     example_rows = [
-        ["客户", "客户", "customer", "cust", "VARCHAR(64)"],
-        ["订单", "订单", "order", "ord", "INT"],
-        ["产品", "产品", "product", "prod", "VARCHAR(128)"]
+        ["客户", "cust", "客户", "customer", "cust", "VARCHAR(64)"],
+        ["订单", "ord", "订单", "order", "ord", "INT"],
+        ["产品", "prod", "产品", "product", "prod", "VARCHAR(128)"]
     ]
     for row_num, row_data in enumerate(example_rows, 2):
         for col_num, cell_data in enumerate(row_data, 1):
@@ -2099,13 +2790,655 @@ async def save_word_roots_api(roots: List[Dict[str, Any]] = Body(...)):
 
 @app.delete("/api/word-roots")
 async def clear_word_roots():
-    logger.info("清除所有词根请求")
-    if os.path.exists(WORD_ROOTS_FILE):
-        os.remove(WORD_ROOTS_FILE)
-        logger.info("词根文件已删除")
-    return {"code": 0, "message": "词根已清除"}
+    logger.info("清除所有标准词根请求")
+    save_word_roots([])
+    return {"code": 0, "message": "标准词根已清除"}
 
 
+
+@app.get("/api/standard-roots")
+async def get_standard_roots():
+    roots = load_standard_roots()
+    historical_roots = load_effective_historical_roots()
+    enriched_roots = enrich_standard_roots_with_historical_types(roots, historical_roots)
+    if enriched_roots != roots:
+        save_standard_roots(enriched_roots)
+        roots = load_standard_roots()
+    else:
+        roots = enriched_roots
+    return {"code": 0, "data": roots}
+
+
+@app.put("/api/standard-roots/{root_id}")
+async def update_standard_root(root_id: str, payload: Dict[str, Any] = Body(...)):
+    roots = load_standard_roots()
+    index = next((i for i, root in enumerate(roots) if str(root.get("root_id") or "") == root_id), -1)
+    if index == -1:
+        return {"code": 1, "message": "标准词根不存在"}
+
+    existing = roots[index]
+    updated = normalize_standard_root_record({**existing, **payload, "root_id": root_id}, existing)
+    roots[index] = updated
+    save_standard_roots(roots)
+    return {"code": 0, "message": "标准词根更新成功", "data": updated}
+
+
+@app.delete("/api/standard-roots/{root_id}")
+async def delete_standard_root(root_id: str):
+    roots = load_standard_roots()
+    filtered = [root for root in roots if str(root.get("root_id") or "") != root_id]
+    if len(filtered) == len(roots):
+        return {"code": 1, "message": "标准词根不存在"}
+    save_standard_roots(filtered)
+    return {"code": 0, "message": "标准词根删除成功", "data": filtered}
+
+@app.get("/api/historical-roots")
+async def get_historical_roots():
+    roots = load_effective_historical_roots()
+    return {"code": 0, "data": roots}
+
+@app.post("/api/historical-roots")
+async def save_historical_roots_api(roots: List[Dict[str, Any]] = Body(...)):
+    save_effective_historical_roots(roots)
+    return {"code": 0, "message": "historical roots saved"}
+
+@app.get("/api/business-domains")
+async def get_business_domains():
+    return {"code": 0, "data": BUSINESS_DOMAINS}
+
+@app.post("/api/governance/preview")
+async def governance_preview():
+    try:
+        historical = load_effective_historical_roots()
+        return {"code": 0, "data": {"count": len(historical), "roots": historical}}
+    except Exception as e:
+        logger.exception("词根治理预览失败")
+        return governance_error_response(f"词根治理失败: {str(e)}")
+
+
+@app.get("/api/governance/progress/{task_id}")
+async def governance_progress(task_id: str):
+    progress = get_governance_progress(task_id)
+    if not progress:
+        return {"code": 1, "message": "治理任务不存在", "data": None}
+    return {"code": 0, "data": progress}
+
+
+@app.post("/api/governance/run")
+async def governance_run(req: GovernanceRequest):
+    task_id = req.task_id or str(uuid.uuid4())
+    industry_context = normalize_industry_context(req.llm_config.industry_context)
+    if req.task_id != task_id:
+        req.task_id = task_id
+    try:
+        log_governance_event(
+            "task_started",
+            task_id=task_id,
+            phase="governance_run",
+            extra={
+                "requested_workers": req.max_workers,
+                "model": req.llm_config.model,
+                "industry_context_chars": len(industry_context),
+            },
+        )
+        set_governance_progress(
+            task_id,
+            status="running",
+            stage="loading_history",
+            message="正在加载历史词根",
+            raw_root_count=0,
+            prepared_root_count=0,
+            filtered_root_count=0,
+            excluded_standard_count=0,
+            standard_root_count=0,
+            chunk_count=0,
+            requested_workers=req.max_workers,
+            actual_workers=0,
+            completed_chunks=0,
+            current_chunk=0,
+            active_chunks=[],
+            merge_started=False,
+            final_candidate_count=0,
+        )
+        historical = load_effective_historical_roots()
+        if not historical:
+            log_governance_event(
+                "task_no_historical_roots",
+                task_id=task_id,
+                phase="loading_history",
+            )
+            set_governance_progress(
+                task_id,
+                status="completed",
+                stage="completed",
+                message="暂无可治理的历史词根",
+                raw_root_count=0,
+                prepared_root_count=0,
+                filtered_root_count=0,
+                excluded_standard_count=0,
+                standard_root_count=len(load_standard_roots()),
+                chunk_count=0,
+                actual_workers=0,
+            )
+            return {"code": 0, "message": "暂无可治理的历史词根", "data": []}
+
+        started_at = datetime.now()
+        prepared_historical = prepare_historical_roots_for_governance(historical)
+        standard_roots = load_standard_roots()
+        filter_result = filter_historical_roots_against_standard(prepared_historical, standard_roots)
+        filtered_historical = filter_result["kept"]
+        excluded_standard_count = filter_result["excluded_count"]
+        log_governance_event(
+            "roots_prepared",
+            task_id=task_id,
+            phase="preprocess",
+            item_count=len(historical),
+            result_count=len(filtered_historical),
+            extra={
+                "prepared_root_count": len(prepared_historical),
+                "excluded_standard_count": excluded_standard_count,
+                "standard_root_count": filter_result["standard_count"],
+            },
+        )
+        logger.info(
+            "词根治理输入: 原始 %s 条, 去重后 %s 条, 标准已存在剔除 %s 条, 最终待治理 %s 条, 标准词根 %s 条",
+            len(historical),
+            len(prepared_historical),
+            excluded_standard_count,
+            len(filtered_historical),
+            filter_result["standard_count"],
+        )
+        set_governance_progress(
+            task_id,
+            stage="filtering_standard",
+            message=f"已按标准词根过滤，剔除 {excluded_standard_count} 条冲突词根，剩余 {len(filtered_historical)} 条待治理",
+            raw_root_count=len(historical),
+            prepared_root_count=len(prepared_historical),
+            filtered_root_count=len(filtered_historical),
+            excluded_standard_count=excluded_standard_count,
+            standard_root_count=filter_result["standard_count"],
+        )
+
+        if not filtered_historical:
+            log_governance_event(
+                "task_skipped_all_standardized",
+                task_id=task_id,
+                phase="preprocess",
+                item_count=len(historical),
+                result_count=0,
+                extra={
+                    "prepared_root_count": len(prepared_historical),
+                    "excluded_standard_count": excluded_standard_count,
+                },
+            )
+            set_governance_progress(
+                task_id,
+                status="completed",
+                stage="completed",
+                message="历史词根在去重后均已存在于标准词根，无需再次治理",
+                chunk_count=0,
+                actual_workers=0,
+                completed_chunks=0,
+                current_chunk=0,
+                active_chunks=[],
+                merge_started=False,
+                final_candidate_count=0,
+                elapsed_ms=int((datetime.now() - started_at).total_seconds() * 1000),
+            )
+            return {
+                "code": 0,
+                "message": "历史词根已被标准词根覆盖，无需再次治理",
+                "data": [],
+                "meta": {
+                    "task_id": task_id,
+                    "raw_root_count": len(historical),
+                    "prepared_root_count": len(prepared_historical),
+                    "filtered_root_count": 0,
+                    "excluded_standard_count": excluded_standard_count,
+                    "standard_root_count": filter_result["standard_count"],
+                    "chunk_size": GOVERNANCE_CHUNK_SIZE,
+                    "chunk_count": 0,
+                    "requested_workers": max(1, req.max_workers),
+                    "actual_workers": 0,
+                    "chunk_candidate_count": 0,
+                    "final_candidate_count": 0,
+                    "prompt_length": 0,
+                    "elapsed_ms": int((datetime.now() - started_at).total_seconds() * 1000),
+                    "llm_elapsed_ms": 0,
+                }
+            }
+
+        chunks = chunk_roots_for_governance(filtered_historical, GOVERNANCE_CHUNK_SIZE)
+        requested_workers = max(1, req.max_workers)
+        actual_workers = min(requested_workers, max(1, len(chunks)))
+        chunk_item_counts = [len(chunk) for chunk in chunks]
+        log_governance_event(
+            "chunks_built",
+            task_id=task_id,
+            phase="chunking",
+            item_count=len(filtered_historical),
+            result_count=len(chunks),
+            extra={
+                "chunk_size": GOVERNANCE_CHUNK_SIZE,
+                "requested_workers": requested_workers,
+                "actual_workers": actual_workers,
+                "chunk_item_counts": chunk_item_counts,
+            },
+        )
+        set_governance_progress(
+            task_id,
+            stage="chunking",
+            message="已完成切块，准备发起分批治理",
+            raw_root_count=len(historical),
+            prepared_root_count=len(prepared_historical),
+            filtered_root_count=len(filtered_historical),
+            excluded_standard_count=excluded_standard_count,
+            standard_root_count=filter_result["standard_count"],
+            chunk_count=len(chunks),
+            chunk_size=GOVERNANCE_CHUNK_SIZE,
+            requested_workers=requested_workers,
+            actual_workers=actual_workers,
+        )
+        logger.info(
+            "词根治理切块: chunk_size=%s, chunk_count=%s, requested_workers=%s, actual_workers=%s",
+            GOVERNANCE_CHUNK_SIZE,
+            len(chunks),
+            requested_workers,
+            actual_workers,
+        )
+
+        if len(chunks) == 1:
+            single_prompt = build_governance_prompt(chunks[0], industry_context)
+            single_result = run_governance_llm_round(
+                phase_label="词根治理单批",
+                api_url=req.llm_config.api_url,
+                api_key=req.llm_config.api_key,
+                model=req.llm_config.model,
+                temperature=req.llm_config.temperature or 0.3,
+                prompt=single_prompt,
+                timeout_seconds=600,
+                prompt_kind="chunk",
+                task_id=task_id,
+                chunk_index=1,
+                total_chunks=1,
+                item_count=len(chunks[0]),
+            )
+            if not single_result.get("ok"):
+                set_governance_progress(
+                    task_id,
+                    status="failed",
+                    stage="chunk_failed",
+                    message=single_result.get("message", "词根治理失败"),
+                )
+                return governance_error_response(single_result.get("message", "词根治理失败"))
+
+            normalized = dedupe_governed_roots(single_result.get("data", []))
+            total_elapsed_ms = int((datetime.now() - started_at).total_seconds() * 1000)
+            log_governance_event(
+                "task_completed_single_chunk",
+                task_id=task_id,
+                phase="completed",
+                chunk_index=1,
+                total_chunks=1,
+                item_count=len(chunks[0]),
+                result_count=len(normalized),
+                elapsed_ms=total_elapsed_ms,
+            )
+            set_governance_progress(
+                task_id,
+                status="completed",
+                stage="completed",
+                message=f"治理完成，生成 {len(normalized)} 条候选标准词根",
+                completed_chunks=1,
+                current_chunk=1,
+                active_chunks=[],
+                merge_started=False,
+                final_candidate_count=len(normalized),
+                elapsed_ms=total_elapsed_ms,
+            )
+            return {
+                "code": 0,
+                "message": f"治理完成，生成 {len(normalized)} 条标准词根候选",
+                "data": normalized,
+                "meta": {
+                    "task_id": task_id,
+                    "raw_root_count": len(historical),
+                    "prepared_root_count": len(prepared_historical),
+                    "filtered_root_count": len(filtered_historical),
+                    "excluded_standard_count": excluded_standard_count,
+                    "standard_root_count": filter_result["standard_count"],
+                    "chunk_size": GOVERNANCE_CHUNK_SIZE,
+                    "chunk_count": 1,
+                    "requested_workers": requested_workers,
+                    "actual_workers": 1,
+                    "chunk_candidate_count": len(normalized),
+                    "final_candidate_count": len(normalized),
+                    "prompt_length": single_result.get("prompt_length", len(single_prompt)),
+                    "elapsed_ms": total_elapsed_ms,
+                    "llm_elapsed_ms": single_result.get("llm_elapsed_ms", 0),
+                }
+            }
+
+        loop = asyncio.get_running_loop()
+        with ThreadPoolExecutor(max_workers=actual_workers) as governance_executor:
+            chunk_tasks = []
+            for index, chunk in enumerate(chunks, start=1):
+                chunk_prompt = build_governance_prompt(chunk, industry_context)
+                log_governance_event(
+                    "chunk_scheduled",
+                    task_id=task_id,
+                    phase="chunk_running",
+                    chunk_index=index,
+                    total_chunks=len(chunks),
+                    prompt_kind="chunk",
+                    prompt_length=len(chunk_prompt),
+                    item_count=len(chunk),
+                )
+                future = loop.run_in_executor(
+                    governance_executor,
+                    partial(run_governance_chunk, index, len(chunks), req, chunk_prompt),
+                )
+                chunk_tasks.append((index, future))
+
+            set_governance_progress(
+                task_id,
+                stage="chunk_running",
+                message=f"正在并发治理，共 {len(chunks)} 批，当前并发 {actual_workers} 个线程",
+                active_chunks=[index for index, _ in chunk_tasks[:actual_workers]],
+            )
+
+            chunk_results = []
+            completed_chunks = 0
+            active_chunks = [index for index, _ in chunk_tasks[:actual_workers]]
+            for completed_future in asyncio.as_completed([future for _, future in chunk_tasks]):
+                index, result = await completed_future
+                completed_chunks += 1
+                chunk_results.append((index, result))
+                log_governance_event(
+                    "chunk_finished",
+                    task_id=task_id,
+                    phase="chunk_running",
+                    chunk_index=index,
+                    total_chunks=len(chunks),
+                    prompt_kind=result.get("prompt_kind"),
+                    prompt_length=result.get("prompt_length"),
+                    result_count=len(result.get("data", [])) if result.get("ok") else 0,
+                    elapsed_ms=result.get("llm_elapsed_ms"),
+                    extra={"ok": result.get("ok", False), "stage": result.get("stage", "")},
+                )
+                if index in active_chunks:
+                    active_chunks.remove(index)
+                next_chunk_number = completed_chunks + actual_workers
+                if next_chunk_number <= len(chunks):
+                    active_chunks.append(next_chunk_number)
+                set_governance_progress(
+                    task_id,
+                    stage="chunk_running",
+                    message=f"正在处理第 {completed_chunks}/{len(chunks)} 批，当前活跃批次: {', '.join(map(str, active_chunks)) if active_chunks else '无'}",
+                    completed_chunks=completed_chunks,
+                    current_chunk=completed_chunks,
+                    active_chunks=active_chunks,
+                )
+
+            for _, result in chunk_results:
+                if not result.get("ok"):
+                    set_governance_progress(
+                        task_id,
+                        status="failed",
+                        stage="chunk_failed",
+                        message=result.get("message", "词根治理失败"),
+                    )
+                    return governance_error_response(result.get("message", "词根治理失败"))
+
+            chunk_candidates = []
+            chunk_prompt_lengths = []
+            chunk_llm_elapsed_ms = 0
+            for _, result in chunk_results:
+                chunk_candidates.extend(result.get("data", []))
+                chunk_prompt_lengths.append(result.get("prompt_length", 0))
+                chunk_llm_elapsed_ms += result.get("llm_elapsed_ms", 0)
+
+            merged_candidates = dedupe_governed_roots(chunk_candidates)
+            log_governance_event(
+                "chunks_merged_locally",
+                task_id=task_id,
+                phase="chunk_merged",
+                item_count=len(chunk_candidates),
+                result_count=len(merged_candidates),
+                elapsed_ms=chunk_llm_elapsed_ms,
+                extra={"chunk_prompt_lengths": chunk_prompt_lengths},
+            )
+            logger.info(
+                "词根治理分批完成: 原始候选=%s, 去重后候选=%s, 分批累计耗时=%sms",
+                len(chunk_candidates),
+                len(merged_candidates),
+                chunk_llm_elapsed_ms,
+            )
+            if not merged_candidates:
+                set_governance_progress(
+                    task_id,
+                    status="failed",
+                    stage="chunk_empty",
+                    message="词根治理失败: 分批结果为空",
+                )
+                return governance_error_response("词根治理失败: 分批结果为空")
+
+            current_candidates = merged_candidates
+            merge_round = 0
+            merge_llm_elapsed_ms = 0
+            while len(current_candidates) > GOVERNANCE_MERGE_CHUNK_SIZE:
+                merge_round += 1
+                merge_batches = chunk_roots_for_governance(current_candidates, GOVERNANCE_MERGE_CHUNK_SIZE)
+                if len(merge_batches) <= 1:
+                    break
+                log_governance_event(
+                    "merge_round_started",
+                    task_id=task_id,
+                    phase="merge_running",
+                    merge_round=merge_round,
+                    item_count=len(current_candidates),
+                    result_count=len(merge_batches),
+                    extra={
+                        "merge_chunk_size": GOVERNANCE_MERGE_CHUNK_SIZE,
+                        "batch_item_counts": [len(batch) for batch in merge_batches],
+                    },
+                )
+
+                set_governance_progress(
+                    task_id,
+                    stage="merge_running",
+                    message=f"分批治理完成，正在第 {merge_round} 轮压缩 {len(current_candidates)} 条候选词根",
+                    merge_started=True,
+                    active_chunks=[],
+                )
+
+                merge_futures = []
+                for batch_index, batch in enumerate(merge_batches, start=1):
+                    batch_prompt = build_governance_merge_prompt(batch, industry_context)
+                    log_governance_event(
+                        "merge_batch_scheduled",
+                        task_id=task_id,
+                        phase="merge_running",
+                        chunk_index=batch_index,
+                        total_chunks=len(merge_batches),
+                        merge_round=merge_round,
+                        prompt_kind="merge",
+                        prompt_length=len(batch_prompt),
+                        item_count=len(batch),
+                    )
+                    future = loop.run_in_executor(
+                        governance_executor,
+                        partial(
+                            run_governance_llm_round,
+                            phase_label=f"词根治理全局合并-第{merge_round}轮 {batch_index}/{len(merge_batches)}",
+                            api_url=req.llm_config.api_url,
+                            api_key=req.llm_config.api_key,
+                            model=req.llm_config.model,
+                            temperature=req.llm_config.temperature or 0.3,
+                            prompt=batch_prompt,
+                            timeout_seconds=600,
+                            prompt_kind="merge",
+                            task_id=task_id,
+                            chunk_index=batch_index,
+                            total_chunks=len(merge_batches),
+                            merge_round=merge_round,
+                            item_count=len(batch),
+                        ),
+                    )
+                    merge_futures.append(future)
+
+                batch_results = await asyncio.gather(*merge_futures)
+                batch_candidates = []
+                for result in batch_results:
+                    if not result.get("ok"):
+                        set_governance_progress(
+                            task_id,
+                            status="failed",
+                            stage="merge_failed",
+                            message=result.get("message", "词根治理失败"),
+                        )
+                        return governance_error_response(result.get("message", "词根治理失败"))
+                    batch_candidates.extend(result.get("data", []))
+                    merge_llm_elapsed_ms += result.get("llm_elapsed_ms", 0)
+
+                next_candidates = dedupe_governed_roots(batch_candidates)
+                log_governance_event(
+                    "merge_round_finished",
+                    task_id=task_id,
+                    phase="merge_running",
+                    merge_round=merge_round,
+                    item_count=len(batch_candidates),
+                    result_count=len(next_candidates),
+                    elapsed_ms=merge_llm_elapsed_ms,
+                )
+                if len(next_candidates) >= len(current_candidates):
+                    logger.warning(
+                        "词根治理合并未进一步收敛: round=%s, before=%s, after=%s",
+                        merge_round,
+                        len(current_candidates),
+                        len(next_candidates),
+                    )
+                    break
+                current_candidates = next_candidates
+
+            merge_prompt = build_governance_merge_prompt(current_candidates, industry_context)
+            set_governance_progress(
+                task_id,
+                stage="merge_running",
+                message=f"分批治理完成，正在全局合并 {len(current_candidates)} 条候选词根",
+                merge_started=True,
+                active_chunks=[],
+            )
+            merge_result = await loop.run_in_executor(
+                governance_executor,
+                partial(
+                    run_governance_llm_round,
+                    phase_label="词根治理全局合并",
+                    api_url=req.llm_config.api_url,
+                    api_key=req.llm_config.api_key,
+                    model=req.llm_config.model,
+                    temperature=req.llm_config.temperature or 0.3,
+                    prompt=merge_prompt,
+                    timeout_seconds=600,
+                    prompt_kind="merge",
+                    task_id=task_id,
+                    merge_round=merge_round + 1 if merge_round else 0,
+                    item_count=len(current_candidates),
+                ),
+            )
+            if not merge_result.get("ok"):
+                set_governance_progress(
+                    task_id,
+                    status="failed",
+                    stage="merge_failed",
+                    message=merge_result.get("message", "词根治理失败"),
+                )
+                return governance_error_response(merge_result.get("message", "词根治理失败"))
+
+            final_roots = dedupe_governed_roots(merge_result.get("data", []))
+            total_elapsed_ms = int((datetime.now() - started_at).total_seconds() * 1000)
+            log_governance_event(
+                "task_completed",
+                task_id=task_id,
+                phase="completed",
+                item_count=len(filtered_historical),
+                result_count=len(final_roots),
+                elapsed_ms=total_elapsed_ms,
+                extra={
+                    "chunk_count": len(chunks),
+                    "merge_rounds": merge_round,
+                    "chunk_candidate_count": len(merged_candidates),
+                },
+            )
+            set_governance_progress(
+                task_id,
+                status="completed",
+                stage="completed",
+                message=f"治理完成，生成 {len(final_roots)} 条候选标准词根",
+                completed_chunks=len(chunks),
+                current_chunk=len(chunks),
+                active_chunks=[],
+                final_candidate_count=len(final_roots),
+                elapsed_ms=total_elapsed_ms,
+                llm_elapsed_ms=chunk_llm_elapsed_ms + merge_llm_elapsed_ms + merge_result.get("llm_elapsed_ms", 0),
+            )
+            return {
+                "code": 0,
+                "message": f"治理完成，生成 {len(final_roots)} 条标准词根候选",
+                "data": final_roots,
+                "meta": {
+                    "task_id": task_id,
+                    "raw_root_count": len(historical),
+                    "prepared_root_count": len(prepared_historical),
+                    "filtered_root_count": len(filtered_historical),
+                    "excluded_standard_count": excluded_standard_count,
+                    "standard_root_count": filter_result["standard_count"],
+                    "chunk_size": GOVERNANCE_CHUNK_SIZE,
+                    "chunk_count": len(chunks),
+                    "requested_workers": requested_workers,
+                    "actual_workers": actual_workers,
+                    "chunk_candidate_count": len(merged_candidates),
+                    "final_candidate_count": len(final_roots),
+                    "prompt_length": merge_result.get("prompt_length", len(merge_prompt)),
+                    "elapsed_ms": total_elapsed_ms,
+                    "llm_elapsed_ms": chunk_llm_elapsed_ms + merge_llm_elapsed_ms + merge_result.get("llm_elapsed_ms", 0),
+                }
+            }
+    except Exception as e:
+        logger.exception("词根治理未知异常")
+        log_governance_event(
+            "task_failed",
+            task_id=task_id,
+            phase="failed",
+            extra={"error": str(e)},
+        )
+        set_governance_progress(
+            task_id,
+            status="failed",
+            stage="failed",
+            message=f"词根治理失败: {str(e)}",
+        )
+        return governance_error_response(f"词根治理失败: {str(e)}")
+
+@app.post("/api/governance/apply")
+async def governance_apply(governed_roots: list = Body(...)):
+    normalized = [normalize_governed_root(item) for item in governed_roots if isinstance(item, dict)]
+    result = apply_governance_result(normalized)
+    return {"code": 0, "message": f"governance applied: {len(result)} standard roots", "data": result}
+
+@app.delete("/api/historical-roots")
+async def clear_historical_roots():
+    try:
+        save_effective_historical_roots([])
+        return {"code": 0, "message": "historical roots cleared"}
+    except Exception as e:
+        return {"code": 1, "message": str(e)}
+
+@app.post("/api/save-new-roots")
+async def save_new_roots_to_historical(new_roots: list = Body(...)):
+    for r in new_roots:
+        add_to_historical_roots(r)
+    return {"code": 0, "message": f"{len(new_roots)} roots saved to historical"}
 @app.get("/api/history-fields", response_model=WordRootsResponse)
 async def get_history_fields():
     logger.info("获取历史字段请求")
@@ -2414,6 +3747,101 @@ def generate_table_semantic_description(table_name: str, table_info: dict) -> st
     
     return "\n".join(semantic_parts)
 
+
+def normalize_single_table_schema(parsed_schema: dict) -> dict:
+    table_name = str(parsed_schema.get("table_name", "") or "").strip()
+    if not table_name:
+        raise ValueError("未提取出表名")
+
+    fields = parsed_schema.get("fields")
+    if not isinstance(fields, list) or not fields:
+        raise ValueError("未提取出有效字段")
+
+    normalized_fields = []
+    for field in fields:
+        if not isinstance(field, dict):
+            continue
+        field_name = str(field.get("name", "") or "").strip()
+        if not field_name:
+            continue
+        normalized_fields.append({
+            "name": field_name,
+            "type": str(field.get("type", "") or "").strip()
+        })
+
+    if not normalized_fields:
+        raise ValueError("未提取出有效字段")
+
+    return {
+        table_name: {
+            "layer": str(parsed_schema.get("layer", "") or "").strip().lower(),
+            "fields": normalized_fields,
+            "user_specified_subject_domain": str(
+                parsed_schema.get("user_specified_subject_domain", "") or ""
+            ).strip().lower()
+        }
+    }
+
+
+def parse_single_text_to_table_schema(description: str, llm_config, db_type: str) -> dict:
+    prompt = f"""请从下面的中文建表需求中提取单张表的结构化定义，并严格只输出 JSON 对象，不要输出解释。
+
+要求：
+1. 只能提取 1 张表；如果文本中明显描述了多张表，也仍只允许返回 1 张表，否则视为失败。
+2. JSON 格式必须为：
+{{
+  "table_name": "中文表名",
+  "layer": "ods|dim|dwd|dws|ads|input|",
+  "user_specified_subject_domain": "主题域缩写或空字符串",
+  "fields": [
+    {{"name": "中文字段名", "type": "字段类型或空字符串"}}
+  ]
+}}
+3. 如果字段类型无法明确判断，type 返回空字符串。
+4. 不要生成英文表名或英文字段名。
+
+数据库类型：{db_type}
+
+建表需求：
+{description}
+"""
+
+    headers = {
+        "Authorization": f"Bearer {llm_config.api_key}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": llm_config.model,
+        "messages": [
+            {"role": "system", "content": "你是结构化信息抽取助手，只返回合法 JSON 对象。"},
+            {"role": "user", "content": prompt}
+        ],
+        "max_tokens": 2048,
+        "temperature": 0
+    }
+    data = add_deepseek_thinking_body(llm_config.api_url, data)
+    response = requests_session.post(
+        build_llm_url(llm_config.api_url),
+        headers=headers,
+        json=data,
+        timeout=300
+    )
+    if response.status_code != 200:
+        raise ValueError(f"输入解析请求失败: {response.text}")
+
+    response.encoding = 'utf-8'
+    result = response.json()
+    parsed_schema = extract_json_object_from_text(extract_llm_content(result))
+    if not parsed_schema:
+        raise ValueError("输入解析未返回合法 JSON")
+    if "tables" in parsed_schema:
+        tables = parsed_schema.get("tables")
+        if isinstance(tables, list) and len(tables) != 1:
+            raise ValueError("输入解析返回了多张表")
+        if isinstance(tables, list) and len(tables) == 1 and isinstance(tables[0], dict):
+            parsed_schema = tables[0]
+    return normalize_single_table_schema(parsed_schema)
+
 def generate_single_table_ddl(
     table_name: str,
     table_info: dict,
@@ -2422,6 +3850,7 @@ def generate_single_table_ddl(
     root_priority: str,
     custom_prompt: str = "",
     semantic_description: str = "",
+    industry_context: str = "",
     abbr_max_len: int = DEFAULT_ABBR_MAX_LEN,
 ) -> str:
     fields_text = []
@@ -2432,7 +3861,8 @@ def generate_single_table_ddl(
     layer = table_info['layer']
     
     standards = load_standards()
-    standards_content = standards.get('content', '')
+    industry_context = normalize_industry_context(industry_context)
+    standards_content = merge_standards_with_industry(standards.get('content', ''), industry_context)
     
     root_match_name = {'full': '全称', 'abbr': '缩写'}.get(root_priority, root_priority)
     
@@ -2443,6 +3873,7 @@ def generate_single_table_ddl(
     db_type_lower = {'mysql': 'mysql', 'postgresql': 'postgresql', 'oracle': 'oracle'}.get(db_type.lower(), 'mysql')
     db_example_config = get_db_example(db_type_lower, root_priority)
     db_example = f"表名格式: {db_example_config['table_format']}\n\n示例DDL:\n{db_example_config['example']}"
+    industry_context_block = build_industry_context_block(industry_context)
     
     root_constraints = get_root_constraints(root_priority, abbr_max_len)
     root_reuse_principle = get_root_reuse_principle(root_priority, abbr_max_len)
@@ -2467,6 +3898,8 @@ def generate_single_table_ddl(
                 layer=layer,
                 fields_description=fields_description,
                 description=description,
+                industry_context=industry_context,
+                industry_context_block=industry_context_block,
                 db_type=db_type,
                 word_roots_content=format_word_roots_for_prompt(word_roots, root_priority),
                 standards_content=standards_content,
@@ -2477,18 +3910,20 @@ def generate_single_table_ddl(
             )
         except KeyError:
             logger.warning("自定义提示词中缺少必要的占位符，将附加建表需求")
-            prompt = f"{custom_prompt}\n\n【建表需求】\n{description}\n\n【数据库类型】\n{db_type}\n{db_example}\n\n【词根参考】\n{format_word_roots_for_prompt(word_roots, root_priority)}"
+            prompt = f"{custom_prompt}\n\n【建表需求】\n{description}\n\n{industry_context_block}\n\n【数据库类型】\n{db_type}\n{db_example}\n\n【词根参考】\n{format_word_roots_for_prompt(word_roots, root_priority)}"
         
         # 检查提示词是否包含建表需求信息，如果没有则添加
         if description and description not in prompt:
             logger.info("自定义提示词中未包含建表需求，自动附加")
-            prompt = f"{custom_prompt}\n\n【建表需求】\n{description}\n\n【数据库类型】\n{db_type}\n{db_example}\n\n【词根参考】\n{format_word_roots_for_prompt(word_roots, root_priority)}"
+            prompt = f"{custom_prompt}\n\n【建表需求】\n{description}\n\n{industry_context_block}\n\n【数据库类型】\n{db_type}\n{db_example}\n\n【词根参考】\n{format_word_roots_for_prompt(word_roots, root_priority)}"
         prompt = append_root_mode_constraints(prompt, root_constraints, root_reuse_principle)
     else:
         prompt = f"""你是一位数据仓库专家。请根据以下参考信息生成 DDL，不要任何解释和任何思考过程：
 
 【建表需求】
 {description}
+
+{industry_context_block}
 
 【词根参考】
 {format_word_roots_for_prompt(word_roots, root_priority)}
@@ -2525,6 +3960,7 @@ def process_single_table_for_batch(
     model: str,
     custom_prompt: str = "",
     semantic_description: str = "",
+    industry_context: str = "",
     temperature: float = 0.3,
     abbr_max_len: int = DEFAULT_ABBR_MAX_LEN,
 ) -> Tuple[str, str, list]:
@@ -2542,6 +3978,7 @@ def process_single_table_for_batch(
             root_match_priority,
             custom_prompt,
             semantic_description,
+            industry_context,
             abbr_max_len,
         )
         
@@ -2636,207 +4073,130 @@ def process_single_table_for_batch(
         return table_name, f"-- 生成失败: {str(e)}", []
 
 
-def process_batch_task(task_id: str, content: bytes, api_key: str, api_url: str, model: str, db_type: str, root_match_priority: str, custom_prompt: str = "", enable_validation: bool = True, max_workers: int = 5, temperature: float = 0.3, cut_mode: str = "accurate", abbr_max_len: int = DEFAULT_ABBR_MAX_LEN, use_field_level: bool = True):
-    """异步处理批量建表任务（多线程并发版）
-    
-    Args:
-        enable_validation: 是否启用三层校验（校验+自动纠正），默认启用
-        max_workers: 最大并发线程数，默认5，范围1-10
-        temperature: 温度参数，控制输出随机性，默认0.3
-        cut_mode: 分词模式，可选值: accurate(精准模式), full(全模式), search(搜索引擎模式)
-        use_field_level: 是否使用字段级处理流程（推荐），默认启用
-    """
+def run_structured_ddl_task(task_id: str, tables: dict, api_key: str, api_url: str, model: str, db_type: str,
+                            root_match_priority: str, custom_prompt: str = "", enable_validation: bool = True,
+                            max_workers: int = 5, temperature: float = 0.3, cut_mode: str = "accurate",
+                            abbr_max_len: int = DEFAULT_ABBR_MAX_LEN, industry_context: str = "",
+                            history_type: str = "batch", history_description: str = "", input_stage_label: str = "解析Excel文件..."):
     start_time = datetime.now()
     abbr_max_len = resolve_abbr_max_len(abbr_max_len)
-    
-    # 加载开发规范（用于表名生成）
     standards = load_standards()
-    standards_content = standards.get('content', '')
-    
-    tables = None
-    if content is not None:
-        try:
-            tables = parse_batch_table_excel(content)
-        except Exception as e:
-            elapsed_time = (datetime.now() - start_time).total_seconds()
-            logger.error(f"Excel解析失败: {e}，耗时: {elapsed_time:.2f}秒")
-            task_results[task_id] = {
-                "code": 1,
-                "message": f"Excel解析失败: {str(e)}",
-                "elapsed_time": elapsed_time
-            }
-            return
-        
-        if not tables:
-            elapsed_time = (datetime.now() - start_time).total_seconds()
-            task_results[task_id] = {
-                "code": 1,
-                "message": "未解析到有效的表数据",
-                "elapsed_time": elapsed_time
-            }
-            return
-    else:
-        cached = batch_cache.get(task_id)
-        if cached:
-            tables_data = cached.get('tables_data')
-            if tables_data:
-                tables = tables_data
-                logger.info(f"从缓存恢复表数据，共 {len(tables)} 张表")
-            else:
-                elapsed_time = (datetime.now() - start_time).total_seconds()
-                task_results[task_id] = {
-                    "code": 1,
-                    "message": "无法从缓存恢复表数据，请重新上传文件",
-                    "elapsed_time": elapsed_time
-                }
-                return
-        else:
-            elapsed_time = (datetime.now() - start_time).total_seconds()
-            task_results[task_id] = {
-                "code": 1,
-                "message": "无法恢复任务，请重新上传文件",
-                "elapsed_time": elapsed_time
-            }
-            return
-    
-    table_names = list(tables.keys())
-    total_tables = len(table_names)
+    industry_context = normalize_industry_context(industry_context)
+    standards_content = merge_standards_with_industry(standards.get('content', ''), industry_context)
+
+    table_names = list((tables or {}).keys())
+    if not table_names:
+        raise ValueError("未解析到有效的表数据")
+
     logger.info(f"待处理表: {table_names}")
-    logger.info(f"启用多线程并发处理，最大并发数: {min(5, total_tables)}")
-    logger.info(f"批量建表任务 {task_id} 开始执行")
-    
-    combined_description = "批量建表，涵盖以下表和字段：" + "；".join([f"{t_name}({','.join([f['name'] for f in t_info.get('fields', [])])})" for t_name, t_info in tables.items()])
-    
-    filtered_roots, word_roots_content = filter_and_prepare_roots(combined_description, root_match_priority)
-    logger.info(f"批量建表词根筛选完成: 精选 {len(filtered_roots)} 条词根 (原始全量: {len(load_word_roots())} 条)")
-    
-    table_semantic_descriptions = {}
-    for table_name in table_names:
-        table_semantic_descriptions[table_name] = generate_table_semantic_description(table_name, tables[table_name])
-    
-    db_type_name = {'mysql': 'MySQL', 'postgresql': 'PostgreSQL', 'oracle': 'Oracle'}.get(db_type, db_type)
-    
+    logger.info(f"结构化建表任务 {task_id} 开始执行，模式: {history_type}，最大并发: {max_workers}")
+
+    combined_description = "批量建表，涵盖以下表和字段：" + "；".join(
+        [f"{t_name}({','.join([f['name'] for f in t_info.get('fields', [])])})" for t_name, t_info in tables.items()]
+    )
+    filtered_roots, _ = filter_and_prepare_roots(combined_description, root_match_priority)
+    logger.info(f"结构化建表词根筛选完成: 精选 {len(filtered_roots)} 条词根")
+
+    from app.processors.field_processor import FieldProcessor
+
+    all_history_roots_for_matching = load_word_roots()
+    field_processor = FieldProcessor(
+        api_key, api_url, model, temperature,
+        task_id=task_id, progress_callback=update_progress,
+        max_workers=max_workers,
+        custom_prompt=custom_prompt,
+        word_roots=all_history_roots_for_matching,
+        root_match_priority=root_match_priority,
+        cut_mode=cut_mode,
+        standards=standards_content,
+        industry_context=industry_context,
+        abbr_max_len=abbr_max_len,
+        input_stage_label=input_stage_label
+    )
+
     results = {}
     errors = []
-    all_new_roots = []
-    table_violations = {}
-    
-    field_level_completed = False
-    
     field_stats = None
-    if use_field_level and content is not None:
-        logger.info("【字段级处理】开始执行字段级批量处理流程")
-        try:
-            from app.processors.field_processor import FieldProcessor
-            
-            all_history_roots_for_matching = load_word_roots()
-            logger.info(f"【字段级处理】使用完整历史词根库进行匹配，共 {len(all_history_roots_for_matching)} 条词根")
-            logger.info(f"【字段级处理】筛选后的词根（用于LLM参考）: {len(filtered_roots)} 条")
-            
-            field_processor = FieldProcessor(api_key, api_url, model, temperature, 
-                                            task_id=task_id, progress_callback=update_progress,
-                                            max_workers=max_workers,
-                                            custom_prompt=custom_prompt,
-                                            word_roots=all_history_roots_for_matching,
-                                            root_match_priority=root_match_priority,
-                                            cut_mode=cut_mode,
-                                            standards=standards_content,
-                                            abbr_max_len=abbr_max_len)
-            tables_data, field_mapping, field_stats, root_translations = field_processor.build_field_mapping(content)
-            
-            logger.info(f"字段映射构建完成，共 {len(field_mapping)} 个字段映射")
-            logger.info(f"开始为 {len(tables_data)} 张表生成DDL")
-            
-            results = field_processor.generate_all_ddl(tables_data, field_mapping, db_type, root_match_priority, standards_content)
-            field_level_errors = [
-                f"{table_name}: {ddl_content.replace('-- 生成失败:', '').strip()}"
-                for table_name, ddl_content in results.items()
-                if isinstance(ddl_content, str) and ddl_content.startswith("-- 生成失败")
-            ]
-            if field_level_errors:
-                errors.extend(field_level_errors)
-                raise RuntimeError("字段级主流程生成DDL失败: " + "; ".join(field_level_errors))
-            
-            all_history_roots = load_word_roots()
-            existing_chinese = {r.get('chinese_name', '') for r in all_history_roots}
-            
-            all_new_roots = []
-            for chinese_root, english_root in root_translations.items():
-                if chinese_root not in existing_chinese:
-                    all_new_roots.append({
-                        'chinese_name': chinese_root,
-                        'full_root': english_root,
-                        'abbr_root': english_root[:abbr_max_len] if len(english_root) > abbr_max_len else english_root,
-                        'category': 'root',
-                        'recommended_type': 'VARCHAR(255)',
-                        'business_domain': '基础通用'
-                    })
-            
-            logger.info(f"字段级处理完成，生成 {len(results)} 张表的DDL")
-            logger.info(f"字段级处理提取到 {len(all_new_roots)} 个新词根")
-            
-            completed_field_progress = None
-            if field_stats:
-                completed_field_progress = {
-                    "phase": "field_generation_completed",
-                    "phase_label": "字段级处理完成",
-                    "unique_root_count": field_stats.get("total_fields", 0),
-                    "target_item_label": "字段映射",
-                    "total_items": len(field_mapping),
-                    "completed_items": len(field_mapping),
-                    "batch_count": 0,
-                    "completed_batches": 0,
-                    "thread_count": 0
-                }
-            update_progress(
-                task_id,
-                6,
-                8,
-                stage="✅ 字段级处理完成",
-                matched_count=field_stats.get("matched_count") if field_stats else None,
-                unmatched_count=field_stats.get("unmatched_count") if field_stats else None,
-                total_fields=field_stats.get("total_fields") if field_stats else None,
-                field_progress=completed_field_progress
-            )
-            
-            with cache_lock:
-                batch_cache[task_id] = {
-                    'table_names': table_names,
-                    'results': results.copy(),
-                    'errors': errors.copy(),
-                    'next_index': len(table_names),
-                    'db_type': db_type,
-                    'root_match_priority': root_match_priority,
-                    'new_roots': all_new_roots.copy()
-                }
-            
-            field_level_completed = True
-        except Exception as e:
-            logger.error(f"字段级处理失败，终止批量任务: {e}")
-            elapsed_time = (datetime.now() - start_time).total_seconds()
-            task_results[task_id] = {
-                "code": 1,
-                "message": f"字段级主流程失败: {str(e)}",
-                "elapsed_time": elapsed_time,
-                "errors": errors.copy()
+    all_new_roots = []
+
+    try:
+        tables_data, field_mapping, field_stats, root_translations = field_processor.build_field_mapping(tables_data=tables)
+        logger.info(f"字段映射构建完成，共 {len(field_mapping)} 个字段映射")
+        results = field_processor.generate_all_ddl(tables_data, field_mapping, db_type, root_match_priority, standards_content)
+        field_level_errors = [
+            f"{table_name}: {ddl_content.replace('-- 生成失败:', '').strip()}"
+            for table_name, ddl_content in results.items()
+            if isinstance(ddl_content, str) and ddl_content.startswith("-- 生成失败")
+        ]
+        if field_level_errors:
+            errors.extend(field_level_errors)
+            raise RuntimeError("字段级主流程生成DDL失败: " + "; ".join(field_level_errors))
+
+        existing_chinese = {r.get('chinese_name', '') for r in load_word_roots()}
+        for chinese_root, english_root in root_translations.items():
+            if chinese_root not in existing_chinese:
+                all_new_roots.append({
+                    'chinese_name': chinese_root,
+                    'full_root': english_root,
+                    'abbr_root': english_root[:abbr_max_len] if len(english_root) > abbr_max_len else english_root,
+                    'category': 'root',
+                    'recommended_type': 'VARCHAR(255)',
+                    'business_domain': '基础通用'
+                })
+
+        completed_field_progress = None
+        if field_stats:
+            completed_field_progress = {
+                "phase": "field_generation_completed",
+                "phase_label": "字段级处理完成",
+                "unique_root_count": field_stats.get("total_fields", 0),
+                "target_item_label": "字段映射",
+                "total_items": len(field_mapping),
+                "completed_items": len(field_mapping),
+                "batch_count": 0,
+                "completed_batches": 0,
+                "thread_count": max_workers
             }
-            return
-    elif use_field_level:
+        update_progress(
+            task_id,
+            6,
+            8,
+            stage="✅ 字段级处理完成",
+            matched_count=field_stats.get("matched_count") if field_stats else None,
+            unmatched_count=field_stats.get("unmatched_count") if field_stats else None,
+            total_fields=field_stats.get("total_fields") if field_stats else None,
+            field_progress=completed_field_progress
+        )
+    except Exception as e:
         elapsed_time = (datetime.now() - start_time).total_seconds()
+        logger.error(f"字段级处理失败，终止任务: {e}")
         task_results[task_id] = {
             "code": 1,
-            "message": "字段级主流程仅支持Excel上传场景，当前任务缺少原始文件内容",
-            "elapsed_time": elapsed_time
+            "message": f"字段级主流程失败: {str(e)}",
+            "elapsed_time": elapsed_time,
+            "errors": errors.copy()
         }
+        task_validation_flags.pop(task_id, None)
         return
-    
+
     deduplicated_new_roots = []
     seen_chinese_names = set()
     for root in all_new_roots:
         if root['chinese_name'] not in seen_chinese_names:
             deduplicated_new_roots.append(root)
             seen_chinese_names.add(root['chinese_name'])
-    
+
+    with cache_lock:
+        batch_cache[task_id] = {
+            'table_names': table_names,
+            'results': results.copy(),
+            'errors': errors.copy(),
+            'next_index': len(table_names),
+            'db_type': db_type,
+            'root_match_priority': root_match_priority,
+            'new_roots': deduplicated_new_roots.copy()
+        }
+
     all_ddl = "\n\n".join(results.values())
     validation_info = None
     valid_results = {
@@ -2846,20 +4206,19 @@ def process_batch_task(task_id: str, content: bytes, api_key: str, api_url: str,
         and ddl_content.strip()
         and not ddl_content.startswith("-- 生成失败")
     }
-    
+
     if enable_validation and valid_results:
-        # 更新进度：开始校验（第7步）
         update_progress(task_id, 7, 8, stage="🔍 统一校验中...")
         logger.info(f"开始统一校验，共 {len(valid_results)} 张表")
-        
+
         error_count = 0
         warning_count = 0
         all_violations = []
         corrected = False
-        
+
         try:
             from app.validators.unified_validator import UnifiedValidator
-            
+
             unified_validator = UnifiedValidator(
                 word_roots=load_word_roots(),
                 standards=load_standards(),
@@ -2867,34 +4226,20 @@ def process_batch_task(task_id: str, content: bytes, api_key: str, api_url: str,
                 abbr_max_len=abbr_max_len,
             )
             validation_result = unified_validator.validate_batch(valid_results)
-            
             all_violations = validation_result['single_violations'] + validation_result['cross_violations']
             error_count = validation_result['error_count']
             warning_count = validation_result['warning_count']
-            
-            logger.info(f"统一校验完成：{error_count} 个错误，{warning_count} 个警告")
-            
+
             if error_count > 0:
-                # 更新进度：开始修正
                 update_progress(task_id, 7, 8, stage="🔧 统一修正中...")
-                logger.info("开始统一修正...")
-                
                 try:
-                    # 阶段2: 提取错误字段
                     parsed_tables = unified_validator.parse_all_ddl(valid_results)
                     error_fields = unified_validator.extract_error_fields(
                         validation_result['single_violations'],
                         parsed_tables
                     )
-                    
-                    if not error_fields:
-                        logger.info("没有需要修正的错误字段")
-                        corrected = False
-                    else:
-                        # 阶段3: LLM修正阶段（仅传入错误字段）
+                    if error_fields:
                         fix_prompt = unified_validator.generate_field_fix_prompt(error_fields)
-                        logger.info(f"生成修正提示词，包含 {sum(len(f) for f in error_fields.values())} 个错误字段")
-                        
                         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
                         fix_data = {
                             "model": model,
@@ -2905,7 +4250,6 @@ def process_batch_task(task_id: str, content: bytes, api_key: str, api_url: str,
                             "max_tokens": 2048,
                             "temperature": temperature
                         }
-                        
                         fix_data = add_deepseek_thinking_body(api_url, fix_data)
                         fix_response = requests_session.post(
                             build_llm_url(api_url),
@@ -2913,17 +4257,12 @@ def process_batch_task(task_id: str, content: bytes, api_key: str, api_url: str,
                             json=fix_data,
                             timeout=300
                         )
-                        
                         if fix_response.status_code == 200:
                             fix_response.encoding = 'utf-8'
                             fix_result = fix_response.json()
                             llm_output = extract_llm_content(fix_result)
-                            
-                            # 解析LLM返回的修正结果
                             fix_results = unified_validator.parse_field_fix_result(llm_output)
-                            
                             if fix_results:
-                                # 阶段4: DDL重组阶段
                                 corrected_results = unified_validator.reassemble_ddl(
                                     valid_results,
                                     fix_results,
@@ -2931,21 +4270,17 @@ def process_batch_task(task_id: str, content: bytes, api_key: str, api_url: str,
                                 )
                                 results.update(corrected_results)
                                 corrected = True
-                                logger.info(f"修正完成，共修正 {sum(len(f) for f in fix_results.values())} 个字段")
-                            else:
-                                logger.info("LLM返回的修正结果为空")
                         else:
                             logger.error(f"修正请求失败: {fix_response.status_code}")
                 except Exception as e:
                     logger.error(f"统一修正异常: {e}")
                     update_progress(task_id, 7, 8, stage=f"⚠️ 修正失败: {str(e)[:50]}")
-                
+
                 all_ddl = "\n\n".join(results.values())
-                logger.info(f"统一修正完成")
         except Exception as e:
             logger.error(f"统一校验或修正失败: {e}")
             update_progress(task_id, 7, 8, stage=f"❌ 校验失败: {str(e)[:50]}")
-        
+
         validation_info = {
             "error_count": error_count,
             "warning_count": warning_count,
@@ -2953,26 +4288,26 @@ def process_batch_task(task_id: str, content: bytes, api_key: str, api_url: str,
             "total_violations": len(all_violations),
             "corrected": corrected
         }
-    
+
     elapsed_time = (datetime.now() - start_time).total_seconds()
     elapsed_time_str = f"{int(elapsed_time // 60)}分{int(elapsed_time % 60)}秒" if elapsed_time >= 60 else f"{elapsed_time:.2f}秒"
-    
+
     with cache_lock:
         if task_id in batch_cache:
             del batch_cache[task_id]
             logger.info(f"任务 {task_id} 完成，已清除缓存")
-    
+
     save_ddl_history({
-        "type": "batch",
+        "type": history_type,
         "tables_count": len(tables),
         "success_count": len(tables) - len(errors),
         "ddl": all_ddl,
-        "description": f"批量建表: {', '.join(table_names)[:50]}...",
+        "description": history_description,
         "db_type": db_type,
         "root_match_priority": root_match_priority,
         "new_roots": deduplicated_new_roots
     })
-    
+
     result_data = {
         "tables": results,
         "total_tables": len(tables),
@@ -2986,24 +4321,79 @@ def process_batch_task(task_id: str, content: bytes, api_key: str, api_url: str,
         "elapsed_time_str": elapsed_time_str,
         "validation_info": validation_info
     }
-    
     if field_stats:
         result_data["field_stats"] = field_stats
-    
+
     task_results[task_id] = {
         "code": 0,
         "data": result_data
     }
-    
-    # 更新进度：任务完成（第8步）
     update_progress(task_id, 8, 8, stage="✅ 完成建表")
     task_validation_flags.pop(task_id, None)
-    
     if task_id in progress_store:
         del progress_store[task_id]
         logger.info(f"任务 {task_id} 进度数据已清除")
-    
-    logger.info(f"批量建表任务 {task_id} 完成，共 {len(tables)} 张表，成功 {len(tables) - len(errors)} 张，失败 {len(errors)} 张，新词根 {len(deduplicated_new_roots)} 个，总耗时: {elapsed_time_str}")
+
+
+def process_batch_task(task_id: str, content: bytes, api_key: str, api_url: str, model: str, db_type: str,
+                       root_match_priority: str, custom_prompt: str = "", enable_validation: bool = True,
+                       max_workers: int = 5, temperature: float = 0.3, cut_mode: str = "accurate",
+                       abbr_max_len: int = DEFAULT_ABBR_MAX_LEN, industry_context: str = "", use_field_level: bool = True):
+    start_time = datetime.now()
+    try:
+        tables = parse_batch_table_excel(content)
+        if not tables:
+            raise ValueError("未解析到有效的表数据")
+    except Exception as e:
+        elapsed_time = (datetime.now() - start_time).total_seconds()
+        logger.error(f"Excel解析失败: {e}，耗时: {elapsed_time:.2f}秒")
+        task_results[task_id] = {
+            "code": 1,
+            "message": f"Excel解析失败: {str(e)}",
+            "elapsed_time": elapsed_time
+        }
+        task_validation_flags.pop(task_id, None)
+        return
+
+    run_structured_ddl_task(
+        task_id, tables, api_key, api_url, model, db_type, root_match_priority,
+        custom_prompt, enable_validation, max_workers, temperature, cut_mode,
+        abbr_max_len, industry_context, history_type="batch",
+        history_description=f"批量建表: {', '.join(list(tables.keys()))[:50]}...",
+        input_stage_label="解析Excel文件..."
+    )
+
+
+def process_text_generate_task(req: TextGenerateTaskRequest):
+    task_id = req.task_id or str(uuid.uuid4())
+    start_time = datetime.now()
+    update_progress(task_id, 1, 8, stage="输入解析中...", source_label="输入解析")
+
+    try:
+        tables = parse_single_text_to_table_schema(req.description, req.llm_config, req.db_type)
+        if len(tables) != 1:
+            raise ValueError("输入解析返回了多张表")
+        update_progress(task_id, 1, 8, stage="输入解析完成", source_label="输入解析")
+    except Exception as e:
+        elapsed_time = (datetime.now() - start_time).total_seconds()
+        logger.error(f"输入解析失败: {e}")
+        task_results[task_id] = {
+            "code": 1,
+            "message": f"输入解析失败: {str(e)}",
+            "elapsed_time": elapsed_time
+        }
+        task_validation_flags.pop(task_id, None)
+        return
+
+    run_structured_ddl_task(
+        task_id, tables,
+        req.llm_config.api_key, req.llm_config.api_url, req.llm_config.model,
+        req.db_type, req.root_match_priority, req.custom_prompt, req.enable_validation,
+        1, req.llm_config.temperature or 0.3, req.cut_mode, req.llm_config.abbr_max_len,
+        req.llm_config.industry_context or "", history_type="single",
+        history_description=req.description[:80],
+        input_stage_label="输入解析结果整理中..."
+    )
 
 
 @app.post("/api/batch-generate-ddl")
@@ -3012,6 +4402,7 @@ async def batch_generate_ddl(
     api_key: str = Form(...),
     api_url: str = Form(...),
     model: str = Form(...),
+    industry_context: str = Form(""),
     db_type: str = Form("mysql"),
     root_match_priority: str = Form("abbr"),
     task_id: str = Form(None),
@@ -3023,7 +4414,7 @@ async def batch_generate_ddl(
     abbr_max_len: int = Form(DEFAULT_ABBR_MAX_LEN),
 ):
     abbr_max_len = resolve_abbr_max_len(abbr_max_len)
-    logger.info(f"批量生成DDL请求 - 文件: {file.filename}, 数据库类型: {db_type}, 任务ID: {task_id}, 自定义提示词: {'是' if custom_prompt else '否'}, 三层校验: {'启用' if enable_validation else '禁用'}, 并发线程数: {max_workers}, 温度: {temperature}, 分词模式: {cut_mode}, 缩写上限: {abbr_max_len}")
+    logger.info(f"批量生成DDL请求 - 文件: {file.filename}, 数据库类型: {db_type}, 任务ID: {task_id}, 自定义提示词: {'是' if custom_prompt else '否'}, 行业背景: {'是' if normalize_industry_context(industry_context) else '否'}, 三层校验: {'启用' if enable_validation else '禁用'}, 并发线程数: {max_workers}, 温度: {temperature}, 分词模式: {cut_mode}, 缩写上限: {abbr_max_len}")
     
     if not task_id:
         return {"code": 1, "message": "缺少任务ID"}
@@ -3035,9 +4426,22 @@ async def batch_generate_ddl(
     
     content = await file.read()
     
-    asyncio.get_event_loop().run_in_executor(executor, process_batch_task, task_id, content, api_key, api_url, model, db_type, root_match_priority, custom_prompt, enable_validation, max_workers, temperature, cut_mode, abbr_max_len)
+    asyncio.get_event_loop().run_in_executor(executor, process_batch_task, task_id, content, api_key, api_url, model, db_type, root_match_priority, custom_prompt, enable_validation, max_workers, temperature, cut_mode, abbr_max_len, industry_context)
 
     return {"code": 0, "message": "任务已启动", "data": {"task_id": task_id, "enable_validation": enable_validation, "max_workers": max_workers, "abbr_max_len": abbr_max_len}}
+
+
+@app.post("/api/text-generate-ddl-task")
+async def text_generate_ddl_task(req: TextGenerateTaskRequest):
+    task_id = req.task_id or str(uuid.uuid4())
+    logger.info(
+        f"文本生成DDL任务启动 - 任务ID: {task_id}, 数据库类型: {req.db_type}, "
+        f"词根模式: {req.root_match_priority}, 分词模式: {req.cut_mode}, 三层校验: {'启用' if req.enable_validation else '禁用'}"
+    )
+    task_validation_flags[task_id] = req.enable_validation
+    payload = req.model_copy(update={"task_id": task_id})
+    asyncio.get_event_loop().run_in_executor(executor, process_text_generate_task, payload)
+    return {"code": 0, "message": "任务已启动", "data": {"task_id": task_id, "enable_validation": req.enable_validation, "max_workers": 1, "abbr_max_len": req.llm_config.abbr_max_len}}
 
 
 @app.get("/api/batch-result/{task_id}")
@@ -3304,19 +4708,29 @@ async def progress_sse(task_id: str):
 
 if getattr(sys, 'frozen', False):
     exe_dir = os.path.dirname(sys.executable)
+    frontend_candidates = [
+        os.path.join(exe_dir, 'frontend'),
+        os.path.join(exe_dir, 'frontend', 'dist'),
+    ]
 else:
-    exe_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    frontend_candidates = [
+        os.path.join(project_root, 'frontend', 'dist'),
+        os.path.join(project_root, 'frontend'),
+    ]
 
-frontend_dir = os.path.join(exe_dir, "frontend")
-if os.path.exists(frontend_dir):
-    logger.info(f"前端文件已加载，目录: {frontend_dir}")
-    app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
+frontend_dir = next((path for path in frontend_candidates if os.path.exists(path)), None)
+if frontend_dir:
+    logger.info(f'前端文件已加载，目录: {frontend_dir}')
+    app.mount('/', StaticFiles(directory=frontend_dir, html=True), name='frontend')
 else:
-    logger.warning("=" * 60)
-    logger.warning("WARNING: 前端文件未找到！")
-    logger.warning(f"  期望路径: {frontend_dir}")
-    logger.warning("  请确保 frontend 目录与可执行文件在同一目录下")
-    logger.warning("=" * 60)
+    logger.warning('=' * 60)
+    logger.warning('WARNING: 前端文件未找到！')
+    for candidate in frontend_candidates:
+        logger.warning(f'  已检查路径: {candidate}')
+    logger.warning('  开发环境请先构建前端，打包环境请确保 frontend 或 frontend/dist 随程序分发')
+    logger.warning('=' * 60)
+
 
 
 

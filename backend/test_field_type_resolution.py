@@ -4,6 +4,7 @@
 import io
 
 import openpyxl
+import pytest
 
 from app.field_type_resolver import normalize_field_type, resolve_field_type
 from app.main import parse_batch_table_excel
@@ -67,6 +68,84 @@ def test_legacy_batch_parser_uses_same_type_resolution():
     assert types["统计日期"] == "DATETIME"
     assert types["销售数量"] == "INT"
     assert types["销售金额"] == "DECIMAL(18,6)"
+
+
+def test_build_field_mapping_repairs_same_table_duplicate_english_names(monkeypatch):
+    processor = FieldProcessor("", "", "", word_roots=[], root_match_priority="full")
+    tables_data = {
+        "维修工单表": {
+            "layer": "dwd",
+            "fields": [
+                {"name": "送修人", "type": "VARCHAR(128)", "field_index": 1},
+                {"name": "送单人", "type": "VARCHAR(128)", "field_index": 2},
+            ],
+        }
+    }
+
+    monkeypatch.setattr(
+        processor,
+        "process_fields_root_level",
+        lambda groups: (
+            {
+                "送修人": ("send_pers", "VARCHAR(128)"),
+                "送单人": ("send_pers", "VARCHAR(128)"),
+            },
+            {"matched_count": 0, "unmatched_count": 0, "total_fields": 2, "new_roots_count": 0},
+            {},
+        ),
+    )
+
+    monkeypatch.setattr(
+        processor,
+        "_request_duplicate_field_name_fix",
+        lambda conflict: {
+            ("维修工单表", 1, "送修人"): ("repair_sender", "VARCHAR(128)"),
+            ("维修工单表", 2, "送单人"): ("dispatch_sender", "VARCHAR(128)"),
+        },
+    )
+
+    _tables, field_mapping, _stats, _roots = processor.build_field_mapping(tables_data=tables_data)
+
+    assert field_mapping["送修人"][0] == "repair_sender"
+    assert field_mapping["送单人"][0] == "dispatch_sender"
+
+
+def test_build_field_mapping_fails_only_when_duplicate_fix_still_conflicts(monkeypatch):
+    processor = FieldProcessor("", "", "", word_roots=[], root_match_priority="full")
+    tables_data = {
+        "维修工单表": {
+            "layer": "dwd",
+            "fields": [
+                {"name": "送修人", "type": "VARCHAR(128)", "field_index": 1},
+                {"name": "送单人", "type": "VARCHAR(128)", "field_index": 2},
+            ],
+        }
+    }
+
+    monkeypatch.setattr(
+        processor,
+        "process_fields_root_level",
+        lambda groups: (
+            {
+                "送修人": ("send_pers", "VARCHAR(128)"),
+                "送单人": ("send_pers", "VARCHAR(128)"),
+            },
+            {"matched_count": 0, "unmatched_count": 0, "total_fields": 2, "new_roots_count": 0},
+            {},
+        ),
+    )
+
+    monkeypatch.setattr(
+        processor,
+        "_request_duplicate_field_name_fix",
+        lambda conflict: {
+            ("维修工单表", 1, "送修人"): ("send_pers", "VARCHAR(128)"),
+            ("维修工单表", 2, "送单人"): ("send_pers", "VARCHAR(128)"),
+        },
+    )
+
+    with pytest.raises(ValueError, match="自动修正后仍未消除"):
+        processor.build_field_mapping(tables_data=tables_data)
 
 
 def test_generate_ddl_converts_recommended_types_by_database():

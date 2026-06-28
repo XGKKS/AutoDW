@@ -7,9 +7,9 @@ class FakeFieldProcessor:
     def __init__(self, *args, **kwargs):
         self.kwargs = kwargs
 
-    def build_field_mapping(self, content):
-        assert content == b"excel-bytes"
-        tables_data = {
+    def build_field_mapping(self, file_content=None, tables_data=None):
+        assert file_content is None
+        assert tables_data == {
             "test_table": {
                 "layer": "dim",
                 "fields": [{"name": "test_field", "type": "VARCHAR(255)"}],
@@ -30,7 +30,7 @@ class FailingFieldProcessor:
     def __init__(self, *args, **kwargs):
         pass
 
-    def build_field_mapping(self, content):
+    def build_field_mapping(self, file_content=None, tables_data=None):
         raise RuntimeError("mock field-level failure")
 
 
@@ -67,7 +67,7 @@ def test_process_batch_task_uses_field_level_pipeline_without_table_fallback():
 
     result = main.task_results[task_id]
     assert result["code"] == 0
-    assert "work_area" in result["data"]["ddl"]
+    assert "work_area" in result["data"]["full_ddl"]
 
 
 def test_process_batch_task_fails_fast_when_field_level_pipeline_errors():

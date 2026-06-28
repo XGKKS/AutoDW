@@ -34,6 +34,8 @@ TABLE_NAME_PROMPT = """
 
 【中文表名】{chinese_table_name}
 
+{industry_context_block}
+
 【开发规范】
 {standards_content}
 
@@ -107,7 +109,8 @@ class FieldProcessor:
     def __init__(self, api_key: str, api_url: str, model: str, temperature: float = 0.3, 
                  task_id: str = None, progress_callback=None, max_workers: int = 5,
                  custom_prompt: str = "", word_roots: list = None, root_match_priority: str = 'full',
-                 cut_mode: str = "accurate", standards: str = "", abbr_max_len: int = DEFAULT_ABBR_MAX_LEN):
+                 cut_mode: str = "accurate", standards: str = "", industry_context: str = "", abbr_max_len: int = DEFAULT_ABBR_MAX_LEN,
+                 input_stage_label: str = "解析Excel文件..."):
         self.api_key = api_key
         self.api_url = api_url
         self.model = model
@@ -126,7 +129,9 @@ class FieldProcessor:
         self.field_stats = None  # 保存字段统计信息
         self.cut_mode = cut_mode  # normalize and tokenize naming inputs
         self.standards = standards
+        self.industry_context = str(industry_context or "").strip()
         self.abbr_max_len = resolve_abbr_max_len(abbr_max_len)
+        self.input_stage_label = input_stage_label
         self.name_normalizer = NameNormalizer()
         for term in self.name_normalizer.iter_custom_terms():
             try:
@@ -166,6 +171,11 @@ class FieldProcessor:
 
     def _root_style_guide(self) -> str:
         return get_root_constraints(self.root_match_priority, self.abbr_max_len)
+
+    def _industry_context_block(self) -> str:
+        if not self.industry_context:
+            return ""
+        return f"【行业背景】\n{self.industry_context}"
 
     def _choose_root_by_priority(self, root_info: dict) -> str:
         if normalize_priority(self.root_match_priority) == 'abbr':
@@ -541,7 +551,7 @@ class FieldProcessor:
         
     def extract_fields_from_excel(self, file_content: bytes):
         logger.info("【字段级处理】解析批量建表Excel文件")
-        self._update_progress(1, 8, "解析Excel文件...")
+        self._update_progress(1, 8, self.input_stage_label)
         
         wb = openpyxl.load_workbook(io.BytesIO(file_content))
         tables = {}
@@ -608,6 +618,60 @@ class FieldProcessor:
         
         logger.info(f"【字段级处理】Excel解析完成，共 {len(tables)} 张表，{len(all_fields)} 个字段")
         return tables, all_fields
+
+    def extract_fields_from_tables(self, tables: dict):
+        logger.info("【字段级处理】读取结构化输入数据")
+        self._update_progress(1, 8, self.input_stage_label)
+
+        normalized_tables = {}
+        subject_domain_values = {}
+        all_fields = []
+
+        for table_name, table_info in (tables or {}).items():
+            if not table_name:
+                continue
+
+            layer = str(table_info.get('layer', '') or '').strip().lower()
+            subject_domain = str(table_info.get('user_specified_subject_domain', '') or '').strip().lower()
+            normalized_tables[table_name] = {
+                'layer': layer,
+                'fields': [],
+                'user_specified_subject_domain': subject_domain
+            }
+            subject_domain_values[table_name] = set([subject_domain]) if subject_domain else set()
+
+            for raw_field in table_info.get('fields', []) or []:
+                field_name = str(raw_field.get('name', '') or '').strip()
+                if not field_name:
+                    continue
+
+                field_type = str(raw_field.get('type', '') or '').strip() or resolve_field_type(field_name)
+                field_index = len(normalized_tables[table_name]['fields']) + 1
+                normalized_tables[table_name]['fields'].append({
+                    'name': field_name,
+                    'type': field_type,
+                    'table_name': table_name,
+                    'table_layer': layer,
+                    'field_index': field_index
+                })
+                all_fields.append(FieldInfo(
+                    table_name=table_name,
+                    table_layer=layer,
+                    field_index=field_index,
+                    chinese_name=field_name,
+                    suggested_type=field_type
+                ))
+
+        for table_name, domains in subject_domain_values.items():
+            domains = {domain for domain in domains if domain}
+            if len(domains) > 1:
+                conflict_values = ", ".join(sorted(domains))
+                raise ValueError(f"表[{table_name}]存在多个冲突的主题域值: {conflict_values}，请统一后重试")
+            if len(domains) == 1:
+                normalized_tables[table_name]['user_specified_subject_domain'] = next(iter(domains))
+
+        logger.info(f"【字段级处理】结构化输入读取完成，共 {len(normalized_tables)} 张表，{len(all_fields)} 个字段")
+        return normalized_tables, all_fields
     
     def group_fields_by_chinese(self, fields):
         logger.info("【字段级处理】按中文词义分组字段")
@@ -725,6 +789,8 @@ class FieldProcessor:
             prompt = f"""请为以下中文业务词根生成英文翻译，严禁使用无意义的命名翻译
 {self._render_custom_prompt_root_mode()}
 
+{self._industry_context_block()}
+
 【字段列表】
 {fields_text}
 
@@ -743,6 +809,8 @@ class FieldProcessor:
 不要输出任何解释，只输出字段映射。"""
         else:
             prompt = f"""请为以下中文业务字段生成英文词根：
+
+{self._industry_context_block()}
 
 【字段列表】
 {fields_text}
@@ -844,6 +912,7 @@ class FieldProcessor:
         # 构建提示词
         prompt = TABLE_NAME_PROMPT.format(
             chinese_table_name=chinese_table_name,
+            industry_context_block=self._industry_context_block(),
             standards_content=standards_content,
             db_type=db_type,
             table_format=table_format,
@@ -1242,6 +1311,8 @@ class FieldProcessor:
             prompt = f"""请为以下中文业务词根生成英文翻译，严禁使用无意义的命名翻译
 {self._render_custom_prompt_root_mode()}
 
+{self._industry_context_block()}
+
 【待翻译词根列表】
 {roots_text}
 
@@ -1265,6 +1336,8 @@ class FieldProcessor:
 不要输出任何解释，只输出词根映射。"""
         else:
             prompt = f"""请为以下中文业务词根生成英文翻译，严禁使用无意义的命名翻译：
+
+{self._industry_context_block()}
 
 【待翻译词根列表】
 {roots_text}
@@ -1859,6 +1932,196 @@ class FieldProcessor:
             repaired_rows.append((chinese_name, repaired_name, final_type))
         return repaired_rows
 
+    def _resolve_candidate_field_name(self, chinese_name: str, field_mapping: dict) -> str:
+        if chinese_name in field_mapping:
+            english_name, _llm_type = field_mapping[chinese_name]
+            english_name = self._ensure_identifier_by_priority(english_name, f"field {chinese_name}")
+        else:
+            english_name = self._compose_field_name_from_roots(chinese_name)
+
+        if not self._is_safe_generated_identifier(english_name, f"field {chinese_name}"):
+            english_name = self._repair_field_name(chinese_name, english_name)
+
+        return self.name_normalizer.normalize_english_identifier(english_name)
+
+    def _collect_duplicate_generated_field_names(self, tables: dict, field_mapping: dict) -> list:
+        conflicts = []
+
+        for table_name, table_info in (tables or {}).items():
+            duplicate_map = {}
+            used_names = set()
+
+            for field in table_info.get('fields', []) or []:
+                chinese_name = field.get('name', '')
+                field_index = field.get('field_index')
+                english_name = self._resolve_candidate_field_name(chinese_name, field_mapping)
+                if not english_name:
+                    continue
+
+                duplicate_map.setdefault(english_name, []).append({
+                    'field_name': chinese_name,
+                    'field_index': field_index,
+                    'field_type': field.get('type', ''),
+                    'current_english_name': english_name,
+                })
+                used_names.add(english_name)
+
+            for english_name, conflict_fields in duplicate_map.items():
+                if len(conflict_fields) < 2:
+                    continue
+
+                non_conflict_names = {
+                    name for name, items in duplicate_map.items()
+                    if len(items) == 1 and name != english_name
+                }
+                conflicts.append({
+                    'table_name': table_name,
+                    'duplicate_english_name': english_name,
+                    'fields': conflict_fields,
+                    'used_names': sorted(non_conflict_names),
+                })
+
+        return conflicts
+
+    def _build_duplicate_field_fix_prompt(self, conflict: dict) -> str:
+        table_name = conflict['table_name']
+        duplicate_english_name = conflict['duplicate_english_name']
+        used_names = conflict.get('used_names', [])
+        style_guide = self._root_style_guide()
+        available_roots = ", ".join(self._available_roots_for_priority()) or "无"
+
+        field_lines = []
+        for field in conflict.get('fields', []):
+            field_lines.append(
+                f"- 序号{field.get('field_index')}：{field.get('field_name')} -> {field.get('current_english_name')} ({field.get('field_type') or 'VARCHAR(255)'})"
+            )
+
+        used_name_text = "、".join(used_names) if used_names else "无"
+
+        return f"""请修正同一张表内重复的英文字段名，只输出修正结果，不要解释。
+
+{self._industry_context_block()}
+
+【问题表】
+{table_name}
+
+【重复情况】
+这个表里有 {len(conflict.get('fields', []))} 个字段重复映射成了 `{duplicate_english_name}`，需要修正成不重复的字段名。
+
+【待修正字段】
+{chr(10).join(field_lines)}
+
+【当前表内其他已使用字段名】
+{used_name_text}
+
+【可用词根列表】
+{available_roots}
+
+【命名规则】
+1. 字段名必须使用下划线分隔，全部小写
+2. {style_guide}
+3. 这几个字段修正后必须彼此不同
+4. 修正后不得与当前表内其他已使用字段名重复
+5. 要贴合中文语义，不允许直接加无意义序号凑唯一
+6. 推荐字段类型保持原值
+
+【输出格式】
+表名|字段序号|中文字段名:修正英文字段名:推荐字段类型
+
+【输出示例】
+{table_name}|1|送修人:repair_sender:VARCHAR(128)
+{table_name}|2|送单人:dispatch_sender:VARCHAR(128)
+"""
+
+    def _parse_duplicate_field_fix_response(self, content: str) -> dict:
+        mapping = {}
+        for raw_line in content.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith('#') or line.startswith('--'):
+                continue
+            parts = line.split(':')
+            if len(parts) < 2:
+                continue
+            field_key = parts[0].strip()
+            english_name = parts[1].strip()
+            field_type = parts[2].strip() if len(parts) > 2 else ""
+            key_parts = field_key.split('|')
+            if len(key_parts) != 3:
+                continue
+            table_name, field_index, chinese_name = [item.strip() for item in key_parts]
+            if not field_index.isdigit() or not chinese_name or not english_name:
+                continue
+            mapping[(table_name, int(field_index), chinese_name)] = (
+                self.name_normalizer.normalize_english_identifier(english_name),
+                field_type,
+            )
+        return mapping
+
+    def _request_duplicate_field_name_fix(self, conflict: dict) -> dict:
+        prompt = self._build_duplicate_field_fix_prompt(conflict)
+        data = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": "你是一位数据仓库字段命名修正专家，请专门修复同表重复英文字段名问题。"},
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": 1024,
+            "temperature": min(max(self.temperature, 0.1), 0.4)
+        }
+
+        response = self._post_llm(data, timeout=180)
+        if response.status_code != 200:
+            logger.error(f"重复字段修正LLM调用失败: {response.status_code}")
+            return {}
+
+        response.encoding = 'utf-8'
+        result = response.json()
+        content = self._extract_llm_content(result)
+        return self._parse_duplicate_field_fix_response(content)
+
+    def _check_duplicate_generated_field_names(self, tables: dict, field_mapping: dict) -> dict:
+        conflicts = self._collect_duplicate_generated_field_names(tables, field_mapping)
+        if not conflicts:
+            return field_mapping
+
+        self._update_progress(5, 8, "检测到重复字段名，正在定向修正...")
+        logger.warning(f"【字段级处理】检测到 {len(conflicts)} 组同表重复英文字段，开始定向修正")
+
+        for conflict in conflicts:
+            fixed_mapping = self._request_duplicate_field_name_fix(conflict)
+            for field in conflict.get('fields', []):
+                key = (
+                    conflict['table_name'],
+                    field.get('field_index'),
+                    field.get('field_name'),
+                )
+                if key not in fixed_mapping:
+                    continue
+                fixed_name, fixed_type = fixed_mapping[key]
+                if not fixed_name:
+                    continue
+                current_type = field_mapping.get(field['field_name'], ("", field.get('field_type', '')))[1]
+                field_mapping[field['field_name']] = (
+                    fixed_name,
+                    fixed_type or current_type or field.get('field_type', ''),
+                )
+
+        remaining_conflicts = self._collect_duplicate_generated_field_names(tables, field_mapping)
+        if remaining_conflicts:
+            duplicate_messages = []
+            for conflict in remaining_conflicts:
+                conflict_desc = "、".join(
+                    f"{item['field_name']}(序号{item['field_index']})"
+                    for item in conflict.get('fields', [])
+                )
+                duplicate_messages.append(
+                    f"表[{conflict['table_name']}]中字段英文名[{conflict['duplicate_english_name']}]仍重复，对应中文字段: {conflict_desc}"
+                )
+            raise ValueError("检查阶段发现同表重复字段英文名，且自动修正后仍未消除: " + "; ".join(duplicate_messages))
+
+        self._update_progress(5, 8, "重复字段名修正完成，继续生成字段名...")
+        return field_mapping
+
     def _repair_table_name(self, chinese_table_name: str, candidate: str = "", layer: str = "", theme_prefix: str = "") -> str:
         candidate = self.name_normalizer.normalize_english_identifier(candidate)
         if candidate:
@@ -2053,8 +2316,11 @@ COMMENT ON TABLE {full_table_name} IS '{table_name}';"""
             raise ValueError(f"表 '{chinese_table_name}' 缺少符合规范的业务表名，无法生成DDL")
         logger.info(f"【字段级处理】表名兜底转换结果: '{chinese_table_name}' -> '{english_name}'")
         return english_name
-    def build_field_mapping(self, file_content):
-        tables, all_fields = self.extract_fields_from_excel(file_content)
+    def build_field_mapping(self, file_content=None, tables_data=None):
+        if tables_data is not None:
+            tables, all_fields = self.extract_fields_from_tables(tables_data)
+        else:
+            tables, all_fields = self.extract_fields_from_excel(file_content)
         groups = self.group_fields_by_chinese(all_fields)
         
         # 使用新的词根级处理流程
@@ -2062,6 +2328,8 @@ COMMENT ON TABLE {full_table_name} IS '{table_name}';"""
         
         self.field_mapping = field_mapping
         self.root_translations = root_translations
+        field_mapping = self._check_duplicate_generated_field_names(tables, field_mapping)
+        self.field_mapping = field_mapping
         logger.info(f"【字段级处理】字段映射构建完成，共 {len(field_mapping)} 个字段")
         return tables, field_mapping, stats, root_translations
     
