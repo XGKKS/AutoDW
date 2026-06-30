@@ -1,4 +1,4 @@
-﻿import io
+import io
 import json
 import re
 import hashlib
@@ -11,8 +11,10 @@ import openpyxl
 import jieba
 from app.field_type_resolver import get_excel_field_type, resolve_field_type
 from app.name_normalizer import NameNormalizer, VALIDATION_ROOT_TOKENS
+from app.prompt_segments import render_prompt_segment
 from app.root_policy import (
     DEFAULT_ABBR_MAX_LEN,
+    LAYER_PREFIXES,
     build_root_sets,
     ensure_theme_prefix,
     filter_translation_by_mode,
@@ -28,6 +30,10 @@ from app.root_policy import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class TaskCancelledError(RuntimeError):
+    """Raised when the current batch task has been cancelled."""
 
 TABLE_NAME_PROMPT = """
 【任务】根据以下信息生成符合规范的英文表名
@@ -110,7 +116,7 @@ class FieldProcessor:
                  task_id: str = None, progress_callback=None, max_workers: int = 5,
                  custom_prompt: str = "", word_roots: list = None, root_match_priority: str = 'full',
                  cut_mode: str = "accurate", standards: str = "", industry_context: str = "", abbr_max_len: int = DEFAULT_ABBR_MAX_LEN,
-                 input_stage_label: str = "解析Excel文件..."):
+                 input_stage_label: str = "解析Excel文件...", prompt_segments_base_dir: str = "", should_cancel=None):
         self.api_key = api_key
         self.api_url = api_url
         self.model = model
@@ -132,6 +138,8 @@ class FieldProcessor:
         self.industry_context = str(industry_context or "").strip()
         self.abbr_max_len = resolve_abbr_max_len(abbr_max_len)
         self.input_stage_label = input_stage_label
+        self.prompt_segments_base_dir = prompt_segments_base_dir
+        self.should_cancel = should_cancel
         self.name_normalizer = NameNormalizer()
         for term in self.name_normalizer.iter_custom_terms():
             try:
@@ -144,10 +152,10 @@ class FieldProcessor:
             if len(token) <= self.abbr_max_len:
                 self.abbr_root_set.add(token)
         
-        # 构建历史词根映射表（中文 -> 英文）
+        # 构建标准词根映射表（中文 -> 英文）
         self.existing_root_map = {}
         loaded_count = 0
-        logger.info(f"【字段级处理】开始加载历史词根，共接收 {len(self.word_roots)} 条词根数据")
+        logger.info(f"【字段级处理】开始加载标准词根，共接收 {len(self.word_roots)} 条词根数据")
         
         for idx, root in enumerate(self.word_roots):
             chinese_name = root.get('chinese_name', '').strip()  # 去除前后空格
@@ -166,8 +174,21 @@ class FieldProcessor:
                 if idx < 10:
                     logger.debug(f"【字段级处理】加载词根 {idx}: '{chinese_name}' -> full='{full_root}', abbr='{abbr_root}'")
         
-        logger.info(f"【字段级处理】已加载 {loaded_count} 条历史词根到映射表")
+        logger.info(f"【字段级处理】已加载 {loaded_count} 条标准词根到映射表")
         logger.info(f"【字段级处理】映射表中包含的词根示例（前10条）: {list(self.existing_root_map.keys())[:10]}")
+
+    def _ensure_not_cancelled(self):
+        if callable(self.should_cancel) and self.should_cancel():
+            raise TaskCancelledError("任务已终止")
+
+    def _render_prompt_segment(self, key: str, values: dict) -> dict:
+        if not self.prompt_segments_base_dir:
+            return {}
+        try:
+            return render_prompt_segment(self.prompt_segments_base_dir, key, values)
+        except Exception as e:
+            logger.warning(f"【字段级处理】加载分段提示词失败，使用内置提示词: {key}, {e}")
+            return {}
 
     def _root_style_guide(self) -> str:
         return get_root_constraints(self.root_match_priority, self.abbr_max_len)
@@ -307,6 +328,41 @@ class FieldProcessor:
             return False
         return True
 
+    def _theme_prefix_from_layer(self, layer: str, standards_content: str = "") -> str:
+        layer_prefix = str(layer or "").strip().lower().strip("_")
+        if not layer_prefix or layer_prefix in LAYER_PREFIXES:
+            return ""
+        if not re.fullmatch(r"[a-z][a-z0-9_]{1,9}", layer_prefix):
+            return ""
+        return layer_prefix
+
+    def _strip_leading_namespace_from_table_body(self, table_body: str, namespace: str = "") -> str:
+        body = self.name_normalizer.normalize_english_identifier(table_body)
+        namespace = self.name_normalizer.normalize_english_identifier(namespace)
+        if not body or not namespace:
+            return body
+        parts = [part for part in body.split("_") if part]
+        while len(parts) > 1 and parts[0] == namespace:
+            parts = parts[1:]
+        return "_".join(parts)
+
+    def _extract_table_identifier_from_llm_output(self, raw_output: str) -> str:
+        text = str(raw_output or "").strip()
+        if not text:
+            return ""
+        text = re.sub(r"^```(?:sql)?\s*|\s*```$", "", text, flags=re.IGNORECASE).strip()
+
+        create_match = re.search(
+            r"\bcreate\s+table\s+(?:if\s+not\s+exists\s+)?([`\"'\[\]A-Za-z0-9_.$]+)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if create_match:
+            return create_match.group(1).strip()
+
+        first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
+        return first_line.split()[0] if first_line else text
+
     def _is_deepseek_native_api(self) -> bool:
         normalized = (self.api_url or '').strip().rstrip('/').lower()
         if normalized.endswith('/chat/completions'):
@@ -326,6 +382,7 @@ class FieldProcessor:
         return request_payload
 
     def _post_llm(self, payload: dict, timeout: int):
+        self._ensure_not_cancelled()
         return requests.post(
             self._build_llm_url(),
             headers={
@@ -504,7 +561,7 @@ class FieldProcessor:
         if canonical:
             return (canonical, 'VARCHAR(255)')
 
-        logger.debug(f"【字段级处理】未命中历史库，映射示例: {list(self.existing_root_map.keys())[:20]}")
+        logger.debug(f"【字段级处理】未命中标准词根库，映射示例: {list(self.existing_root_map.keys())[:20]}")
         return None
     def _try_split_and_match(self, chinese_name):
         """
@@ -525,14 +582,14 @@ class FieldProcessor:
             if translated:
                 english_parts.append(translated)
             else:
-                logger.debug(f"【字段级处理】词组 '{phrase}' 未命中历史词根")
+                logger.debug(f"【字段级处理】词组 '{phrase}' 未命中标准词根")
                 return None
 
         if english_parts:
             logger.info(f"【字段级处理】拆分匹配成功: '{chinese_name}' -> {english_parts}")
             return english_parts
 
-        logger.info(f"【字段级处理】部分词组未匹配到历史词根，交给 LLM 处理")
+        logger.info(f"【字段级处理】部分词组未匹配到标准词根，交给 LLM 处理")
         return None
     def _update_progress(self, current, total, stage=None, matched_count=None, unmatched_count=None,
                          total_fields=None, field_progress=None):
@@ -690,12 +747,12 @@ class FieldProcessor:
         return groups
     
     def split_into_batches(self, groups):
-        logger.info("【字段级处理】将字段分组分批处理（含历史词根匹配）")
-        logger.info(f"【字段级处理】历史词根库大小: {len(self.existing_root_map)} 条")
+        logger.info("【字段级处理】将字段分组分批处理（含标准词根匹配）")
+        logger.info(f"【字段级处理】标准词根库大小: {len(self.existing_root_map)} 条")
         logger.info(f"【字段级处理】待匹配的字段分组数量: {len(groups)} 个")
         logger.info(f"【字段级处理】待匹配的字段分组示例: {list(groups.keys())[:10]}")
         
-        # 先进行历史词根匹配
+        # 先进行标准词根匹配
         matched_fields = {}  # 已匹配的历史词根
         unmatched_groups = {}  # 需要提交给LLM的字段组
         
@@ -707,7 +764,7 @@ class FieldProcessor:
             if matched_result:
                 english_name, field_type = matched_result
                 matched_fields[chinese_name] = (english_name, field_type)
-                logger.info(f"【字段级处理】✅ 历史词根匹配成功: '{chinese_name}' -> '{english_name}'")
+                logger.info(f"【字段级处理】✅ 标准词根匹配成功: '{chinese_name}' -> '{english_name}'")
             else:
                 # 完全匹配失败，尝试拆分匹配
                 split_parts = self._try_split_and_match(chinese_name)
@@ -718,9 +775,9 @@ class FieldProcessor:
                     logger.info(f"【字段级处理】✅ 拆分匹配成功: '{chinese_name}' -> '{english_name}'")
                 else:
                     unmatched_groups[chinese_name] = field_list
-                    logger.info(f"【字段级处理】❌ 历史词根匹配失败: '{chinese_name}'")
+                    logger.info(f"【字段级处理】❌ 标准词根匹配失败: '{chinese_name}'")
         
-        logger.info(f"【字段级处理】历史词根匹配完成，已匹配 {len(matched_fields)} 个，未匹配 {len(unmatched_groups)} 个")
+        logger.info(f"【字段级处理】标准词根匹配完成，已匹配 {len(matched_fields)} 个，未匹配 {len(unmatched_groups)} 个")
         
         # 打印匹配成功的字段
         if matched_fields:
@@ -881,7 +938,7 @@ class FieldProcessor:
         logger.info(f"从LLM响应中解析到 {len(mapping)} 个字段映射")
         return mapping
     
-    def generate_table_name(self, chinese_table_name, db_type, standards_content='', layer=''):
+    def generate_table_name(self, chinese_table_name, db_type, standards_content='', layer='', theme_prefix=''):
         """
         调用LLM生成英文表名
         :param chinese_table_name: 中文表名
@@ -891,8 +948,17 @@ class FieldProcessor:
         :return: 英文表名
         """
         logger.info(f"【字段级处理】调用LLM生成表名: '{chinese_table_name}', layer: '{layer}'")
+        self._ensure_not_cancelled()
         
-        theme_prefix = infer_theme_prefix(chinese_table_name, layer, standards_content=standards_content)
+        theme_prefix = (
+            (theme_prefix or '').strip().lower()
+            or self._theme_prefix_from_layer(layer, standards_content)
+            or infer_theme_prefix(
+            chinese_table_name,
+            layer,
+            standards_content=standards_content,
+            )
+        )
         example_domain = theme_prefix or "biz"
 
         # 根据数据库类型设置输出示例
@@ -909,28 +975,36 @@ class FieldProcessor:
             'oracle': f'使用大写 SCHEMA.TABLE 格式，表名包含业务域前缀（如 DWD.{example_domain.upper()}_ORDER）'
         }.get(db_type.lower(), '使用下划线前缀表示分层与业务域')
         
-        # 构建提示词
-        prompt = TABLE_NAME_PROMPT.format(
-            chinese_table_name=chinese_table_name,
-            industry_context_block=self._industry_context_block(),
-            standards_content=standards_content,
-            db_type=db_type,
-            table_format=table_format,
-            table_name_example=table_name_example,
-            available_roots=", ".join(self._available_roots_for_priority()) or "无",
-            root_constraints=self._root_style_guide(),
-            root_reuse_principle=get_root_reuse_principle(self.root_match_priority, self.abbr_max_len)
-        )
-        prompt += THEME_PREFIX_PROMPT_BLOCK.format(
-            theme_prefix=theme_prefix,
-            theme_prefix_guide=render_theme_prefix_guide(standards_content)
-        )
+        segment_values = {
+            "chinese_table_name": chinese_table_name,
+            "industry_context_block": self._industry_context_block(),
+            "standards_content": standards_content,
+            "db_type": db_type,
+            "table_format": table_format,
+            "table_name_example": table_name_example,
+            "available_roots": ", ".join(self._available_roots_for_priority()) or "无",
+            "root_constraints": self._root_style_guide(),
+            "root_reuse_principle": get_root_reuse_principle(self.root_match_priority, self.abbr_max_len),
+            "theme_prefix": theme_prefix,
+            "theme_prefix_guide": render_theme_prefix_guide(standards_content),
+        }
+        prompt_segment = self._render_prompt_segment("table_name_generate", segment_values)
+        if prompt_segment:
+            prompt = prompt_segment["user_prompt"]
+            system_prompt = prompt_segment["system_prompt"]
+        else:
+            prompt = TABLE_NAME_PROMPT.format(**segment_values)
+            prompt += THEME_PREFIX_PROMPT_BLOCK.format(
+                theme_prefix=theme_prefix,
+                theme_prefix_guide=render_theme_prefix_guide(standards_content)
+            )
+            system_prompt = "你是一位数据仓库专家，请根据中文表名生成符合规范的英文表名。"
         
         # 调用LLM
         data = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": "你是一位数据仓库专家，请根据中文表名生成符合规范的英文表名。"},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ],
             "max_tokens": 64,
@@ -946,8 +1020,10 @@ class FieldProcessor:
                 table_name = self._extract_llm_content(result)
                 if not table_name:
                     logger.warning(f"【字段级处理】表名生成响应为空，改用动态词根fallback: '{chinese_table_name}'")
-                    return self.translate_table_name(chinese_table_name, layer)
-                logger.info(f"【字段级处理】表名生成成功: '{chinese_table_name}' -> '{table_name}'")
+                    return self.translate_table_name(chinese_table_name, layer, theme_prefix)
+                raw_table_name = table_name
+                table_name = self._extract_table_identifier_from_llm_output(table_name)
+                logger.info(f"【字段级处理】表名生成成功: '{chinese_table_name}' -> '{raw_table_name}', 提取表名: '{table_name}'")
                 
                 # 处理LLM返回的表名，提取纯表名部分
                 # 情况1: 表名可能已经是 schema.table 格式（如 dim.product_info）
@@ -980,13 +1056,13 @@ class FieldProcessor:
                 if self._is_safe_table_body(table_name, theme_prefix):
                     return table_name
                 logger.warning(f"【字段级处理】LLM表名不符合表名规则，改用动态词根fallback: {table_name}")
-                return self.translate_table_name(chinese_table_name, layer)
+                return self.translate_table_name(chinese_table_name, layer, theme_prefix)
             else:
                 logger.error(f"【字段级处理】表名生成失败: HTTP {response.status_code}")
-                return self.translate_table_name(chinese_table_name, layer)
+                return self.translate_table_name(chinese_table_name, layer, theme_prefix)
         except Exception as e:
             logger.error(f"【字段级处理】表名生成异常: {str(e)}")
-            return self.translate_table_name(chinese_table_name, layer)
+            return self.translate_table_name(chinese_table_name, layer, theme_prefix)
     
     def process_batches_parallel(self, batches):
         logger.info("【字段级处理】并行调用LLM生成字段映射")
@@ -1037,6 +1113,7 @@ class FieldProcessor:
         processed_fields = 0
         
         for chinese_name in groups.keys():
+            self._ensure_not_cancelled()
             cleaned_name = self.name_normalizer.clean_chinese_text(chinese_name)
             # 根据分词模式选择不同的分词方法
             if not cleaned_name:
@@ -1092,16 +1169,16 @@ class FieldProcessor:
     
     def match_roots_against_history(self, unique_roots):
         """
-        对所有词根进行历史词根匹配
+        对所有词根进行标准词根匹配
         :param unique_roots: 唯一词根列表
         :return: (matched_roots, unmatched_roots)
             matched_roots: {chinese_root: english_root}
             unmatched_roots: [chinese_root1, chinese_root2, ...]
         """
-        logger.info(f"【字段级处理】开始匹配历史词根，共 {len(unique_roots)} 个词根")
+        logger.info(f"【字段级处理】开始匹配标准词根，共 {len(unique_roots)} 个词根")
         
-        # 更新进度：开始历史词根匹配
-        self._update_progress(4, 8, "历史词根匹配中...")
+        # 更新进度：开始标准词根匹配
+        self._update_progress(4, 8, "标准词根匹配中...")
         
         matched_roots = {}
         unmatched_roots = []
@@ -1109,6 +1186,7 @@ class FieldProcessor:
         processed_roots = 0
         
         for root in unique_roots:
+            self._ensure_not_cancelled()
             matched_result = self.match_existing_root(root)
             if matched_result:
                 english_root, _ = matched_result
@@ -1121,19 +1199,19 @@ class FieldProcessor:
             processed_roots += 1
             # 每处理50个词根更新一次进度
             if processed_roots % 50 == 0:
-                self._update_progress(4, 8, f"历史词根匹配 [{processed_roots}/{total_roots}]")
+                self._update_progress(4, 8, f"标准词根匹配 [{processed_roots}/{total_roots}]")
         
         # 更新进度：匹配完成
         self._update_progress(
             4,
             8,
-            f"历史词根匹配完成：匹配{len(matched_roots)}个，LLM需生成{len(unmatched_roots)}个，去重词根{len(unique_roots)}个",
+            f"标准词根匹配完成：匹配{len(matched_roots)}个，LLM需生成{len(unmatched_roots)}个，去重词根{len(unique_roots)}个",
             matched_count=len(matched_roots),
             unmatched_count=len(unmatched_roots),
             total_fields=len(unique_roots),
             field_progress={
                 "phase": "history_matched",
-                "phase_label": "历史词根匹配完成",
+                "phase_label": "标准词根匹配完成",
                 "matched_count": len(matched_roots),
                 "unmatched_count": len(unmatched_roots),
                 "unique_root_count": len(unique_roots),
@@ -1145,7 +1223,7 @@ class FieldProcessor:
             }
         )
         
-        logger.info(f"【字段级处理】历史词根匹配完成，已匹配 {len(matched_roots)} 个，未匹配 {len(unmatched_roots)} 个")
+        logger.info(f"【字段级处理】标准词根匹配完成，已匹配 {len(matched_roots)} 个，未匹配 {len(unmatched_roots)} 个")
         
         return matched_roots, unmatched_roots
 
@@ -1164,6 +1242,7 @@ class FieldProcessor:
         if not self.api_url or not self.model:
             logger.info("【字段级处理】未配置LLM接口，跳过词根语义归一")
             return {}
+        self._ensure_not_cancelled()
 
         history_rows = []
         for cn_root, root_info in self.existing_root_map.items():
@@ -1174,13 +1253,23 @@ class FieldProcessor:
         roots_text = "\n".join(roots)
         history_text = "\n".join(history_rows) if history_rows else "无"
         style_guide = self._root_style_guide()
+        prompt_segment = self._render_prompt_segment("root_semantic_normalize", {
+            "roots_text": roots_text,
+            "history_text": history_text,
+            "style_guide": style_guide,
+        })
 
-        prompt = f"""请对以下中文业务词根做语义归一和英文翻译。
+        if prompt_segment:
+            system_prompt = prompt_segment["system_prompt"]
+            prompt = prompt_segment["user_prompt"]
+        else:
+            system_prompt = "你是一位数据仓库词根语义归一专家，请识别同义/近义业务词根并统一英文命名。"
+            prompt = f"""请对以下中文业务词根做语义归一和英文翻译。
 
 【待归一词根列表】
 {roots_text}
 
-【历史词根映射（优先沿用）】
+【当前标准词根映射（优先沿用）】
 {history_text}
 
 【当前词根模式约束】
@@ -1189,7 +1278,7 @@ class FieldProcessor:
 【要求】
 1. 判断待归一词根中是否存在同义词、近义词或同一业务概念的不同说法。
 2. 同义/近义词必须输出同一个英文词根，例如“预计”和“预估”如果语义相同，应使用同一个英文词根。
-3. 如果历史词根映射中已有相同语义，请优先沿用历史英文词根。
+3. 如果当前标准词根映射中已有相同语义，请优先沿用标准英文词根。
 4. 必须为每个待归一词根输出一行。
 
 【输出格式】
@@ -1200,7 +1289,7 @@ class FieldProcessor:
         data = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": "你是一位数据仓库词根语义归一专家，请识别同义/近义业务词根并统一英文命名。"},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ],
             "max_tokens": 4096,
@@ -1268,6 +1357,7 @@ class FieldProcessor:
         if not remaining_roots:
             logger.info(f"【字段级处理】全部未匹配词根已由语义归一覆盖，获得 {len(all_translations)} 个词根翻译")
             return all_translations
+        self._ensure_not_cancelled()
         
         # 按中文ASCII排序分批
         batches = create_batches_by_ascii_order(remaining_roots, MAX_FIELDS_PER_GROUP)
@@ -1279,6 +1369,7 @@ class FieldProcessor:
             futures = {executor.submit(self._translate_roots_batch, batch): batch for batch in batches}
             
             for future in as_completed(futures):
+                self._ensure_not_cancelled()
                 try:
                     batch_translations = future.result()
                     all_translations.update(batch_translations)
@@ -1296,6 +1387,7 @@ class FieldProcessor:
         """
         if not roots_batch:
             return {}
+        self._ensure_not_cancelled()
         
         roots_text = "\n".join(roots_batch)
         semantic_rows = [
@@ -1362,10 +1454,22 @@ class FieldProcessor:
 用户ID:user_id
 
 不要输出任何解释，只输出词根映射。"""
+
+        prompt_segment = self._render_prompt_segment("root_translate", {
+            "standards": self.standards,
+            "style_guide": style_guide,
+            "industry_context_block": self._industry_context_block(),
+            "roots_text": roots_text,
+            "semantic_text": semantic_text,
+        })
+        if prompt_segment:
+            prompt = prompt_segment["user_prompt"]
         
         try:
             # 构建system prompt：开发规范 + 角色定义
-            if self.standards:
+            if prompt_segment:
+                system_content = prompt_segment["system_prompt"]
+            elif self.standards:
                 system_content = f"""你是一位数据仓库专家，请根据中文业务词根生成符合规范的英文翻译。
 
 【开发规范】
@@ -1573,6 +1677,7 @@ class FieldProcessor:
         """设计一批字段（Layer 3专用）"""
         if not fields_batch:
             return {}
+        self._ensure_not_cancelled()
         
         prompt = self.build_layer3_prompt(fields_batch)
         
@@ -1998,6 +2103,19 @@ class FieldProcessor:
 
         used_name_text = "、".join(used_names) if used_names else "无"
 
+        prompt_segment = self._render_prompt_segment("duplicate_field_fix", {
+            "industry_context_block": self._industry_context_block(),
+            "table_name": table_name,
+            "duplicate_count": len(conflict.get('fields', [])),
+            "duplicate_english_name": duplicate_english_name,
+            "field_lines": chr(10).join(field_lines),
+            "used_name_text": used_name_text,
+            "available_roots": available_roots,
+            "style_guide": style_guide,
+        })
+        if prompt_segment:
+            return prompt_segment["user_prompt"]
+
         return f"""请修正同一张表内重复的英文字段名，只输出修正结果，不要解释。
 
 {self._industry_context_block()}
@@ -2058,11 +2176,13 @@ class FieldProcessor:
         return mapping
 
     def _request_duplicate_field_name_fix(self, conflict: dict) -> dict:
+        self._ensure_not_cancelled()
         prompt = self._build_duplicate_field_fix_prompt(conflict)
+        prompt_segment = self._render_prompt_segment("duplicate_field_fix", {})
         data = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": "你是一位数据仓库字段命名修正专家，请专门修复同表重复英文字段名问题。"},
+                {"role": "system", "content": prompt_segment.get("system_prompt") or "你是一位数据仓库字段命名修正专家，请专门修复同表重复英文字段名问题。"},
                 {"role": "user", "content": prompt}
             ],
             "max_tokens": 1024,
@@ -2135,20 +2255,25 @@ class FieldProcessor:
             logger.warning(f"Table name repaired for '{chinese_table_name}': '{candidate}' -> '{fallback}'")
             return fallback
 
-        logger.warning(f"Table name repair failed for '{chinese_table_name}': '{candidate}'")
+        logger.warning(f"Table name repair failed for '{chinese_table_name}': candidate='{candidate}', fallback='{fallback}'")
         raise ValueError(f"表 '{chinese_table_name}' 缺少符合规范的业务表名，无法生成DDL")
 
     def generate_ddl_for_table(self, table_name, table_info, field_mapping, 
                                db_type='mysql', root_match_priority='full',
                                standards_content=''):
+        self._ensure_not_cancelled()
         layer = table_info.get('layer', '')
         fields = table_info.get('fields', [])
         user_subject_domain = (table_info.get('user_specified_subject_domain') or '').strip().lower()
-        theme_prefix = user_subject_domain or infer_theme_prefix(table_name, layer, standards_content=standards_content)
+        theme_prefix = (
+            user_subject_domain
+            or self._theme_prefix_from_layer(layer, standards_content)
+            or infer_theme_prefix(table_name, layer, standards_content=standards_content)
+        )
         
         # 调用LLM生成英文表名（如果有开发规范），否则使用fallback
         if standards_content.strip():
-            english_table_name = self.generate_table_name(table_name, db_type, standards_content, layer)
+            english_table_name = self.generate_table_name(table_name, db_type, standards_content, layer, theme_prefix)
         else:
             english_table_name = self.translate_table_name(table_name, layer, theme_prefix)
         english_table_name = normalize_table_business_domain(
@@ -2194,13 +2319,16 @@ class FieldProcessor:
         table_name_with_layer = f"{layer}_{english_table_name}" if layer else english_table_name
         
         if db_type_lower == 'mysql':
+            mysql_table_body = self._strip_leading_namespace_from_table_body(english_table_name, layer)
+            table_name_with_layer = f"{layer}_{mysql_table_body}" if layer else mysql_table_body
             ddl = f"""CREATE TABLE `{table_name_with_layer}` (
 {',\n'.join(field_definitions)}
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='{table_name}';"""
         elif db_type_lower == 'postgresql':
             # PostgreSQL 使用 schema.table 格式
             schema_name = layer if layer else 'public'
-            full_table_name = f'"{schema_name}"."{english_table_name}"'
+            table_body = self._strip_leading_namespace_from_table_body(english_table_name, schema_name)
+            full_table_name = f'"{schema_name}"."{table_body}"'
             
             ddl = f"""CREATE TABLE {full_table_name} (
 {',\n'.join(field_definitions)}
@@ -2214,7 +2342,8 @@ COMMENT ON TABLE {full_table_name} IS '{table_name}';"""
         elif db_type_lower == 'oracle':
             # Oracle 使用大写 SCHEMA.TABLE 格式
             schema_name = layer.upper() if layer else 'PUBLIC'
-            full_table_name = f'"{schema_name}"."{english_table_name.upper()}"'
+            table_body = self._strip_leading_namespace_from_table_body(english_table_name, schema_name)
+            full_table_name = f'"{schema_name}"."{table_body.upper()}"'
             field_definitions_upper = [fd.replace('"', '"').upper() for fd in field_definitions]
             
             ddl = f"""CREATE TABLE {full_table_name} (
@@ -2244,7 +2373,11 @@ COMMENT ON TABLE {full_table_name} IS '{table_name}';"""
         logger.info(f"【字段级处理】尝试转换表名: '{chinese_table_name}', layer: '{layer}'")
 
         layer_prefixes = ['dim', 'dwd', 'dws', 'ods', 'ads', 'input']
-        theme_prefix = theme_prefix or infer_theme_prefix(chinese_table_name, layer, standards_content=self.standards)
+        theme_prefix = (
+            theme_prefix
+            or self._theme_prefix_from_layer(layer, self.standards)
+            or infer_theme_prefix(chinese_table_name, layer, standards_content=self.standards)
+        )
         cleaned_name = self._strip_table_structure_suffixes(chinese_table_name)
         parts = self.name_normalizer.tokenize_chinese_name(cleaned_name, jieba.lcut)
 
@@ -2255,7 +2388,7 @@ COMMENT ON TABLE {full_table_name} IS '{table_name}';"""
         if semantic_name:
             english_parts = semantic_name.split('_')
             if len(english_parts) < 2:
-                logger.warning(f"【字段级处理】表名只匹配到部分历史词根: '{chinese_table_name}' -> '{semantic_name}'")
+                logger.warning(f"【字段级处理】表名只匹配到部分标准词根: '{chinese_table_name}' -> '{semantic_name}'")
                 english_parts = []
                 matched_from_root_library = False
                 partial_table_match = True
@@ -2358,6 +2491,7 @@ COMMENT ON TABLE {full_table_name} IS '{table_name}';"""
             
             completed_tables = 0
             for future in as_completed(futures):
+                self._ensure_not_cancelled()
                 try:
                     table_name, ddl = future.result()
                     results[table_name] = ddl

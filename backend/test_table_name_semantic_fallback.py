@@ -89,4 +89,28 @@ def test_missing_table_roots_fail_instead_of_using_placeholder_name():
     )
 
     with pytest.raises(ValueError, match="表名"):
-        processor.translate_table_name("400工单反馈表", "dwd")
+        processor.translate_table_name("年度计划表", "dwd")
+
+
+def test_llm_table_name_extracts_identifier_from_create_table_response(monkeypatch):
+    processor = FieldProcessor(
+        "test-key",
+        "http://llm.example/v1",
+        "test-model",
+        word_roots=[
+            {"chinese_name": "生产", "full_root": "product", "abbr_root": "prod"},
+            {"chinese_name": "计划", "full_root": "plan", "abbr_root": "plan"},
+        ],
+        root_match_priority="abbr",
+    )
+
+    class Response:
+        status_code = 200
+        encoding = "utf-8"
+
+        def json(self):
+            return {"choices": [{"message": {"content": "CREATE TABLE dwd_prod_plan"}}]}
+
+    monkeypatch.setattr(processor, "_post_llm", lambda payload, timeout: Response())
+
+    assert processor.generate_table_name("年度计划表", "mysql", "enable llm", "dwd") == "prod_plan"

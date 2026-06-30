@@ -360,21 +360,6 @@
     "change_history": []
   },
   {
-    "domain_code": "log",
-    "business_domain": "物流",
-    "chinese_name": "位置",
-    "full_root": "location",
-    "abbr_root": "loc",
-    "recommended_type": "VARCHAR(64)",
-    "governance_status": "governed",
-    "merged_from": [],
-    "root_id": "d7d51c6b66f14a1b9f0156da5280478b",
-    "usage_count": 1,
-    "created_at": "2026-06-27T22:49:15",
-    "updated_at": "2026-06-27T22:49:15",
-    "change_history": []
-  },
-  {
     "domain_code": "mkt",
     "business_domain": "营销",
     "chinese_name": "优惠券",
@@ -759,14 +744,14 @@
     "business_domain": "通用",
     "chinese_name": "修改",
     "full_root": "update",
-    "abbr_root": "updr",
+    "abbr_root": "upd",
     "recommended_type": "VARCHAR(64)",
     "governance_status": "governed",
     "merged_from": [],
     "root_id": "7010893da61249a785774fc9dc0d3244",
     "usage_count": 1,
     "created_at": "2026-06-27T22:49:15",
-    "updated_at": "2026-06-27T23:24:04",
+    "updated_at": "2026-06-30T18:27:09",
     "change_history": [
       {
         "edited_at": "2026-06-27T23:23:57",
@@ -859,6 +844,54 @@
           "chinese_name": "修改",
           "full_root": "update",
           "abbr_root": "updr",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      },
+      {
+        "edited_at": "2026-06-30T18:27:09",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "修改",
+          "full_root": "update",
+          "abbr_root": "updr",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "修改",
+          "full_root": "update",
+          "abbr_root": "upd",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      },
+      {
+        "edited_at": "2026-06-30T18:27:09",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "修改",
+          "full_root": "update",
+          "abbr_root": "updr",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "修改",
+          "full_root": "update",
+          "abbr_root": "upd",
           "recommended_type": "VARCHAR(64)",
           "governance_status": "governed",
           "merged_from": []
@@ -1589,21 +1622,6 @@
   {
     "domain_code": "cust",
     "business_domain": "客户",
-    "chinese_name": "用户",
-    "full_root": "customer",
-    "abbr_root": "cust",
-    "recommended_type": "VARCHAR(64)",
-    "governance_status": "governed",
-    "merged_from": [],
-    "root_id": "491f4fa152134fd485bbee304202551e",
-    "usage_count": 1,
-    "created_at": "2026-06-27T22:49:15",
-    "updated_at": "2026-06-27T22:49:15",
-    "change_history": []
-  },
-  {
-    "domain_code": "cust",
-    "business_domain": "客户",
     "chinese_name": "门店",
     "full_root": "store",
     "abbr_root": "str",
@@ -1810,16 +1828,65 @@
     "domain_code": "ord",
     "business_domain": "订单",
     "chinese_name": "下单",
-    "full_root": "place_order",
-    "abbr_root": "plac",
+    "full_root": "order",
+    "abbr_root": "ordr",
     "recommended_type": "VARCHAR(64)",
     "governance_status": "governed",
     "merged_from": [],
     "root_id": "6464e3560da14c5f840bcd5e4922dce6",
     "usage_count": 1,
     "created_at": "2026-06-27T22:49:15",
-    "updated_at": "2026-06-27T22:49:15",
-    "change_history": []
+    "updated_at": "2026-06-28T20:37:31",
+    "change_history": [
+      {
+        "edited_at": "2026-06-28T20:37:31",
+        "action": "edited",
+        "before": {
+          "domain_code": "ord",
+          "business_domain": "订单",
+          "chinese_name": "下单",
+          "full_root": "place_order",
+          "abbr_root": "plac",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "ord",
+          "business_domain": "订单",
+          "chinese_name": "下单",
+          "full_root": "order",
+          "abbr_root": "ordr",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      },
+      {
+        "edited_at": "2026-06-28T20:37:31",
+        "action": "edited",
+        "before": {
+          "domain_code": "ord",
+          "business_domain": "订单",
+          "chinese_name": "下单",
+          "full_root": "place_order",
+          "abbr_root": "plac",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "ord",
+          "business_domain": "订单",
+          "chinese_name": "下单",
+          "full_root": "order",
+          "abbr_root": "ordr",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      }
+    ]
   },
   {
     "domain_code": "pub",
@@ -2831,5 +2898,1185 @@
         }
       }
     ]
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "位置",
+    "full_root": "address",
+    "abbr_root": "addr",
+    "recommended_type": "VARCHAR(128)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "0938a6a85c4941fe9bb1093f659e4740",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "住址",
+    "full_root": "address",
+    "abbr_root": "addr",
+    "recommended_type": "VARCHAR(128)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "b26a918913f44b31b077ba7f7be594dc",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "创建",
+    "full_root": "create",
+    "abbr_root": "creat",
+    "recommended_type": "VARCHAR(64)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "cce7d5b4540f4203a342872d8294b05b",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-30T11:33:25",
+    "change_history": [
+      {
+        "edited_at": "2026-06-30T11:33:24",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "创建",
+          "full_root": "create_time",
+          "abbr_root": "ctime",
+          "recommended_type": "DATETIME",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "创建",
+          "full_root": "create",
+          "abbr_root": "creat",
+          "recommended_type": "varchar(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      },
+      {
+        "edited_at": "2026-06-30T11:33:24",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "创建",
+          "full_root": "create_time",
+          "abbr_root": "ctime",
+          "recommended_type": "DATETIME",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "创建",
+          "full_root": "create",
+          "abbr_root": "creat",
+          "recommended_type": "varchar(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      },
+      {
+        "edited_at": "2026-06-30T11:33:25",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "创建",
+          "full_root": "create",
+          "abbr_root": "creat",
+          "recommended_type": "varchar(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "创建",
+          "full_root": "create",
+          "abbr_root": "creat",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      }
+    ]
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "新建时间",
+    "full_root": "create_time",
+    "abbr_root": "ctime",
+    "recommended_type": "DATETIME",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "21b6f26aad9d4a74b7d0eedc36e107a1",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "更新",
+    "full_root": "upda_tm",
+    "abbr_root": "utime",
+    "recommended_type": "DATETIME",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "86800c6a1a04415291cbc65080f61c8b",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:34:17",
+    "change_history": [
+      {
+        "edited_at": "2026-06-28T20:34:17",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "更新",
+          "full_root": "update_time",
+          "abbr_root": "utime",
+          "recommended_type": "DATETIME",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "更新",
+          "full_root": "upda_tm",
+          "abbr_root": "utime",
+          "recommended_type": "DATETIME",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      },
+      {
+        "edited_at": "2026-06-28T20:34:17",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "更新",
+          "full_root": "update_time",
+          "abbr_root": "utime",
+          "recommended_type": "DATETIME",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "更新",
+          "full_root": "upda_tm",
+          "abbr_root": "utime",
+          "recommended_type": "DATETIME",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      }
+    ]
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "编辑时间",
+    "full_root": "update_time",
+    "abbr_root": "upd_tm",
+    "recommended_type": "DATETIME",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "b54a41010f3e49fe80051bb53655589e",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:31:27",
+    "change_history": [
+      {
+        "edited_at": "2026-06-28T20:31:27",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "编辑时间",
+          "full_root": "update_time",
+          "abbr_root": "utime",
+          "recommended_type": "DATETIME",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "编辑时间",
+          "full_root": "update_time",
+          "abbr_root": "upd_tm",
+          "recommended_type": "DATETIME",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      },
+      {
+        "edited_at": "2026-06-28T20:31:27",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "编辑时间",
+          "full_root": "update_time",
+          "abbr_root": "utime",
+          "recommended_type": "DATETIME",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "编辑时间",
+          "full_root": "update_time",
+          "abbr_root": "upd_tm",
+          "recommended_type": "DATETIME",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      }
+    ]
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "描述",
+    "full_root": "description",
+    "abbr_root": "desc",
+    "recommended_type": "VARCHAR(256)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "c9acacfb4305453e94a309668f1b3702",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "说明",
+    "full_root": "description",
+    "abbr_root": "desc",
+    "recommended_type": "VARCHAR(256)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "06620b60fa9d4d32a110627370554650",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "版本",
+    "full_root": "version",
+    "abbr_root": "ver",
+    "recommended_type": "VARCHAR(32)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "4d2185a50fa249218b072b46d1a69c11",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "版次",
+    "full_root": "version",
+    "abbr_root": "ver",
+    "recommended_type": "VARCHAR(32)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "4c77581164354249be39edae2b7bd5a0",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "路径",
+    "full_root": "path",
+    "abbr_root": "path",
+    "recommended_type": "VARCHAR(256)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "eff48703a06e42568c8cd8b20589b120",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "文件路径",
+    "full_root": "path",
+    "abbr_root": "path",
+    "recommended_type": "VARCHAR(256)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "b0b7699c404049ca915c938d2bdac9b6",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "用户",
+    "full_root": "user",
+    "abbr_root": "user",
+    "recommended_type": "VARCHAR(64)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "559c6ce0ebbd4a77b003a03ce8819bfc",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "操作人员",
+    "full_root": "user",
+    "abbr_root": "user",
+    "recommended_type": "VARCHAR(64)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "6e9fe42601694b6e9e83e94d4ddffe0e",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "密码",
+    "full_root": "password",
+    "abbr_root": "pwd",
+    "recommended_type": "VARCHAR(128)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "f1dba269c2674488bb1b2f6e2b67f199",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": [
+      {
+        "edited_at": "2026-06-28T20:10:07",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "密码",
+          "full_root": "password",
+          "abbr_root": "pwd",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "密码",
+          "full_root": "password",
+          "abbr_root": "pwd",
+          "recommended_type": "VARCHAR(128)",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      }
+    ]
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "密钥",
+    "full_root": "password",
+    "abbr_root": "pwd",
+    "recommended_type": "VARCHAR(128)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "e62bd816966745e59a50c016ceb49ae6",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": [
+      {
+        "edited_at": "2026-06-28T20:10:07",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "密钥",
+          "full_root": "password",
+          "abbr_root": "pwd",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "密钥",
+          "full_root": "password",
+          "abbr_root": "pwd",
+          "recommended_type": "VARCHAR(128)",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      }
+    ]
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "邮箱",
+    "full_root": "email",
+    "abbr_root": "email",
+    "recommended_type": "VARCHAR(128)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "3fcfb6f99d9e4f78b71ae13dd57b3458",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": [
+      {
+        "edited_at": "2026-06-28T20:10:07",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "邮箱",
+          "full_root": "email",
+          "abbr_root": "email",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "邮箱",
+          "full_root": "email",
+          "abbr_root": "email",
+          "recommended_type": "VARCHAR(128)",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      }
+    ]
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "电子邮箱",
+    "full_root": "email",
+    "abbr_root": "email",
+    "recommended_type": "VARCHAR(128)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "d8f32ccad0a348809ff635836d329505",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": [
+      {
+        "edited_at": "2026-06-28T20:10:07",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "电子邮箱",
+          "full_root": "email",
+          "abbr_root": "email",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "电子邮箱",
+          "full_root": "email",
+          "abbr_root": "email",
+          "recommended_type": "VARCHAR(128)",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      }
+    ]
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "手机号",
+    "full_root": "phone",
+    "abbr_root": "phone",
+    "recommended_type": "VARCHAR(32)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "43c068f0840d4ac8a1b5716b2d5438b4",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "价格",
+    "full_root": "price",
+    "abbr_root": "price",
+    "recommended_type": "DECIMAL(10,2)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "95f34b9348864c3db7a75c45fcf3688f",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "开始",
+    "full_root": "start",
+    "abbr_root": "start",
+    "recommended_type": "DATE",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "1068de8505c34b258b411bcadf9f230c",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:35:53",
+    "change_history": [
+      {
+        "edited_at": "2026-06-28T20:35:53",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "开始",
+          "full_root": "start_date",
+          "abbr_root": "sdate",
+          "recommended_type": "DATE",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "开始",
+          "full_root": "start",
+          "abbr_root": "start",
+          "recommended_type": "DATE",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      },
+      {
+        "edited_at": "2026-06-28T20:35:53",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "开始",
+          "full_root": "start_date",
+          "abbr_root": "sdate",
+          "recommended_type": "DATE",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "开始",
+          "full_root": "start",
+          "abbr_root": "start",
+          "recommended_type": "DATE",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      }
+    ]
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "起始日期",
+    "full_root": "start_date",
+    "abbr_root": "sdate",
+    "recommended_type": "DATE",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "17eeaa5f9810485e98b7c61df0f8f28a",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "结束",
+    "full_root": "end",
+    "abbr_root": "end",
+    "recommended_type": "DATE",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "5823c2b017e54a81bdb57d8ae8e2f3ed",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:34:53",
+    "change_history": [
+      {
+        "edited_at": "2026-06-28T20:34:53",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "结束",
+          "full_root": "end_date",
+          "abbr_root": "edate",
+          "recommended_type": "DATE",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "结束",
+          "full_root": "end",
+          "abbr_root": "end",
+          "recommended_type": "DATE",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      },
+      {
+        "edited_at": "2026-06-28T20:34:53",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "结束",
+          "full_root": "end_date",
+          "abbr_root": "edate",
+          "recommended_type": "DATE",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "结束",
+          "full_root": "end",
+          "abbr_root": "end",
+          "recommended_type": "DATE",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      }
+    ]
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "截止日期",
+    "full_root": "end_date",
+    "abbr_root": "edate",
+    "recommended_type": "DATE",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "33b636ea8edf4abe9761fbd4eaebb1f1",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "备注",
+    "full_root": "remark",
+    "abbr_root": "rem",
+    "recommended_type": "VARCHAR(256)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "678a6b9af5cc4a34ae6565229f568266",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "注释",
+    "full_root": "remark",
+    "abbr_root": "rem",
+    "recommended_type": "VARCHAR(256)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "aab524e08a3449c89e93ad173510763e",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "链接",
+    "full_root": "url",
+    "abbr_root": "url",
+    "recommended_type": "VARCHAR(256)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "8a1d27d21e4d42a4817d2f885a89d6a3",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "网址",
+    "full_root": "url",
+    "abbr_root": "url",
+    "recommended_type": "VARCHAR(256)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "b66189255bce4a10ae3750eea97cfd63",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "大小",
+    "full_root": "size",
+    "abbr_root": "size",
+    "recommended_type": "BIGINT",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "01d55a6bf06b457d8f61e70d0285b56d",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "文件大小",
+    "full_root": "size",
+    "abbr_root": "size",
+    "recommended_type": "BIGINT",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "ed4e943153444df0aac7cfbf2d2d5fc5",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "创建人",
+    "full_root": "creator",
+    "abbr_root": "crtr",
+    "recommended_type": "VARCHAR(64)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "0b48a9362a4a48f487e449fc8f71ed9f",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:32:07",
+    "change_history": [
+      {
+        "edited_at": "2026-06-28T20:32:07",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "创建人",
+          "full_root": "creator",
+          "abbr_root": "crt",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "创建人",
+          "full_root": "creator",
+          "abbr_root": "crtr",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      },
+      {
+        "edited_at": "2026-06-28T20:32:07",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "创建人",
+          "full_root": "creator",
+          "abbr_root": "crt",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "创建人",
+          "full_root": "creator",
+          "abbr_root": "crtr",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      }
+    ]
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "创建者",
+    "full_root": "creator",
+    "abbr_root": "crtr",
+    "recommended_type": "VARCHAR(64)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "c976fa102ab34382bd83cc0b4843c763",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:32:17",
+    "change_history": [
+      {
+        "edited_at": "2026-06-28T20:32:17",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "创建者",
+          "full_root": "creator",
+          "abbr_root": "crt",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "创建者",
+          "full_root": "creator",
+          "abbr_root": "crtr",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      },
+      {
+        "edited_at": "2026-06-28T20:32:17",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "创建者",
+          "full_root": "creator",
+          "abbr_root": "crt",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "创建者",
+          "full_root": "creator",
+          "abbr_root": "crtr",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      }
+    ]
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "修改人",
+    "full_root": "updater",
+    "abbr_root": "updr",
+    "recommended_type": "VARCHAR(64)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "ad6ba88eb7dd46c2abb4dccd6a66b0e1",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-30T18:27:06",
+    "change_history": [
+      {
+        "edited_at": "2026-06-30T18:27:06",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "修改人",
+          "full_root": "updater",
+          "abbr_root": "upd",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "修改人",
+          "full_root": "updater",
+          "abbr_root": "updr",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      },
+      {
+        "edited_at": "2026-06-30T18:27:06",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "修改人",
+          "full_root": "updater",
+          "abbr_root": "upd",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "修改人",
+          "full_root": "updater",
+          "abbr_root": "updr",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      }
+    ]
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "更新人",
+    "full_root": "updater",
+    "abbr_root": "updr",
+    "recommended_type": "VARCHAR(64)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "bc31a78c40804cb4bbcebda4bfe85361",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:34:01",
+    "change_history": [
+      {
+        "edited_at": "2026-06-28T20:34:01",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "更新人",
+          "full_root": "updater",
+          "abbr_root": "upd",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "更新人",
+          "full_root": "updater",
+          "abbr_root": "updr",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      },
+      {
+        "edited_at": "2026-06-28T20:34:01",
+        "action": "edited",
+        "before": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "更新人",
+          "full_root": "updater",
+          "abbr_root": "upd",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        },
+        "after": {
+          "domain_code": "pub",
+          "business_domain": "通用",
+          "chinese_name": "更新人",
+          "full_root": "updater",
+          "abbr_root": "updr",
+          "recommended_type": "VARCHAR(64)",
+          "governance_status": "governed",
+          "merged_from": []
+        }
+      }
+    ]
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "分类",
+    "full_root": "category",
+    "abbr_root": "cate",
+    "recommended_type": "VARCHAR(64)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "91b42347614f44e29bc74efbe689593f",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "类别分组",
+    "full_root": "category",
+    "abbr_root": "cate",
+    "recommended_type": "VARCHAR(64)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "513a7c9e6fac4a01b7e371082a08a29d",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "标签",
+    "full_root": "tag",
+    "abbr_root": "tag",
+    "recommended_type": "VARCHAR(64)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "9d8647743ae74aafa472cf8a30a45d7f",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "标记",
+    "full_root": "tag",
+    "abbr_root": "tag",
+    "recommended_type": "VARCHAR(64)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "49207e9ff12e437282e363413ac6511f",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "费用",
+    "full_root": "amount",
+    "abbr_root": "amt",
+    "recommended_type": "DECIMAL(12,2)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "d751420593c84f6db1034021f3575105",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "成本",
+    "full_root": "amount",
+    "abbr_root": "amt",
+    "recommended_type": "DECIMAL(12,2)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "aa0c2e2a02fe4aa08b777e740eb2d102",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
+  },
+  {
+    "domain_code": "pub",
+    "business_domain": "通用",
+    "chinese_name": "花费",
+    "full_root": "amount",
+    "abbr_root": "amt",
+    "recommended_type": "DECIMAL(12,2)",
+    "governance_status": "governed",
+    "merged_from": [],
+    "root_id": "484a15fd2dd54c288d93c96b3076bb1d",
+    "usage_count": 1,
+    "created_at": "2026-06-28T20:10:07",
+    "updated_at": "2026-06-28T20:10:07",
+    "change_history": []
   }
 ]

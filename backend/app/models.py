@@ -22,7 +22,6 @@ class GenerateDDLRequest(BaseModel):
     standards_input: TextInput
     description: str
     db_type: Literal["mysql", "postgresql", "oracle"]
-    custom_prompt: str = ""
     root_match_priority: Literal["full", "abbr"] = "abbr"
     history_roots: Optional[List[str]] = []
     enable_validation: bool = True
@@ -40,7 +39,6 @@ class TextGenerateTaskRequest(BaseModel):
     llm_config: LLMConfig
     description: str
     db_type: Literal["mysql", "postgresql", "oracle"]
-    custom_prompt: str = ""
     root_match_priority: Literal["full", "abbr"] = "abbr"
     cut_mode: Literal["accurate", "full", "search"] = "accurate"
     enable_validation: bool = True

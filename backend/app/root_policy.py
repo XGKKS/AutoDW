@@ -183,9 +183,7 @@ def normalize_table_business_domain(
             break
 
     if selected_domain and domain_run:
-        if domain_run[0] != selected_domain:
-            return "_".join([selected_domain] + parts[len(domain_run):])
-        return "_".join(parts)
+        return "_".join([selected_domain] + parts[len(domain_run):])
 
     if len(domain_run) <= 1:
         return "_".join(parts)

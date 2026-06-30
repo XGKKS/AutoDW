@@ -1,0 +1,32 @@
+[
+  {
+    "key": "text_schema_extract",
+    "guidance": "",
+    "updated_at": ""
+  },
+  {
+    "key": "root_semantic_normalize",
+    "guidance": "",
+    "updated_at": ""
+  },
+  {
+    "key": "root_translate",
+    "guidance": "",
+    "updated_at": ""
+  },
+  {
+    "key": "table_name_generate",
+    "guidance": "【输出格式】\n请只输出英文表名，不要包含任何解释或额外内容。\n比如：\n生产计划表，直接输出：”prod_plan“，不要输出：CREATE TABLE prod_plan",
+    "updated_at": "2026-06-30 15:55:34"
+  },
+  {
+    "key": "duplicate_field_fix",
+    "guidance": "",
+    "updated_at": ""
+  },
+  {
+    "key": "validation_field_fix",
+    "guidance": "",
+    "updated_at": ""
+  }
+]

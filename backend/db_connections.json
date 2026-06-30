@@ -1,5 +1,17 @@
 [
   {
+    "id": "642bdc65",
+    "name": "test",
+    "db_type": "mysql",
+    "host": "test",
+    "port": 3306,
+    "database": "dddddd",
+    "username": "xibei",
+    "password_encrypted": "gAAAAABqQ3FsM2UJ1ZDACJ3KTFFna09mJF06Oj8LsP-YB4lHn84Yyft7-lkGG_5_UJjyaU5iftAeAtp8RjgNyEmuRCTZi61sqg==",
+    "updated_at": "2026-06-30T15:34:04.628032",
+    "created_at": "2026-06-30T15:34:04.628040"
+  },
+  {
     "id": "123824ff",
     "name": "xibei",
     "db_type": "mysql",

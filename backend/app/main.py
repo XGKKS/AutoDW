@@ -85,6 +85,15 @@ from app.root_policy import (
     render_theme_prefix_guide,
     resolve_abbr_max_len,
 )
+from app.prompt_segments import (
+    load_prompt_segments,
+    load_prompt_segments_response,
+    render_prompt_segment,
+    reset_prompt_segment,
+    reset_prompt_segments,
+    save_prompt_segment,
+    save_prompt_segments,
+)
 
 app = FastAPI(title="数仓建表 AI 助手")
 
@@ -148,6 +157,63 @@ system_prompt_cache = None
 batch_cache = {}
 task_cancel_flags = {}  # 任务终止标志
 
+
+class BatchTaskCancelledError(RuntimeError):
+    """Raised when a running batch/text task is cancelled."""
+
+
+def is_task_cancelled(task_id: Optional[str]) -> bool:
+    return bool(task_id and task_cancel_flags.get(task_id, False))
+
+
+def ensure_task_not_cancelled(task_id: Optional[str]):
+    if is_task_cancelled(task_id):
+        raise BatchTaskCancelledError("任务已终止")
+
+
+def cleanup_task_runtime(task_id: Optional[str], clear_result: bool = False):
+    if not task_id:
+        return
+    task_validation_flags.pop(task_id, None)
+    task_cancel_flags.pop(task_id, None)
+    progress_store.pop(task_id, None)
+    with cache_lock:
+        batch_cache.pop(task_id, None)
+    if clear_result:
+        task_results.pop(task_id, None)
+
+
+def resolve_background_task_id(*args) -> Optional[str]:
+    if not args:
+        return None
+    first_arg = args[0]
+    if isinstance(first_arg, str):
+        return first_arg
+    return getattr(first_arg, "task_id", None)
+
+
+def mark_task_failed(task_id: str, message: str, errors: Optional[List[str]] = None,
+                     elapsed_time: Optional[float] = None, stage: str = "❌ 任务失败"):
+    payload = {
+        "code": 1,
+        "message": message,
+    }
+    if elapsed_time is not None:
+        payload["elapsed_time"] = elapsed_time
+    if errors is not None:
+        payload["errors"] = errors
+    task_results[task_id] = payload
+    update_progress(task_id, 8, 8, stage=stage)
+
+
+def mark_task_cancelled(task_id: str, stage: str = "⛔ 任务已终止"):
+    task_results[task_id] = {
+        "code": 1,
+        "message": "任务已终止",
+        "cancelled": True
+    }
+    update_progress(task_id, 8, 8, stage=stage)
+
 def update_progress(task_id, current, total, table_name=None, stage=None, matched_count=None,
                     unmatched_count=None, total_fields=None, enable_validation=None,
                     field_progress=None, source_label=None):
@@ -160,7 +226,7 @@ def update_progress(task_id, current, total, table_name=None, stage=None, matche
         total: 总步骤数（7或8）
         table_name: 当前处理的表名
         stage: 当前阶段的描述
-        matched_count: 已匹配的历史词根数量
+        matched_count: 已匹配的标准词根数量
         unmatched_count: 未匹配的字段数量
         total_fields: 总字段数量
         enable_validation: 是否启用最终校验
@@ -176,7 +242,7 @@ def update_progress(task_id, current, total, table_name=None, stage=None, matche
             "完成建表",
             "组装DDL",
             "jieba分词",
-            "历史词根匹配",
+            "标准词根匹配",
             "生成字段名",
             "生成字段英文名",
         )
@@ -212,7 +278,7 @@ def update_progress(task_id, current, total, table_name=None, stage=None, matche
         },
         {
             "step": 4,
-            "title": "历史词根匹配",
+            "title": "标准词根匹配",
             "icon": "[4/8]",
             "status": "active" if current == 4 else ("completed" if current > 4 else "pending"),
             "sub_progress": None
@@ -253,7 +319,7 @@ def update_progress(task_id, current, total, table_name=None, stage=None, matche
             for m in milestones:
                 if m["step"] == 3:
                     m["sub_progress"] = stage.split("[")[-1].replace("]", "") if "[" in stage else stage
-        elif "历史词根匹配" in stage or "词根匹配" in stage:
+        elif "标准词根匹配" in stage or "词根匹配" in stage:
             for m in milestones:
                 if m["step"] == 4:
                     m["sub_progress"] = stage.split("[")[-1].replace("]", "") if "[" in stage else stage
@@ -309,6 +375,24 @@ def update_progress(task_id, current, total, table_name=None, stage=None, matche
         progress_data['field_progress'] = existing_data['field_progress']
     
     progress_store[task_id] = progress_data
+
+
+def submit_background_task(fn, *args):
+    future = asyncio.get_event_loop().run_in_executor(executor, fn, *args)
+
+    def _finalize(completed_future):
+        try:
+            completed_future.result()
+        except BatchTaskCancelledError:
+            logger.info("后台任务被终止")
+        except Exception as exc:
+            task_id = resolve_background_task_id(*args)
+            logger.exception("后台任务异常退出: %s", exc)
+            if task_id:
+                mark_task_failed(task_id, f"任务执行异常: {str(exc)}", stage="❌ 任务异常退出")
+
+    future.add_done_callback(_finalize)
+    return future
 
 def seed_from_builtin(builtin_path, target_path, content_type="text"):
     if not os.path.exists(builtin_path):
@@ -1356,7 +1440,7 @@ def filter_and_prepare_roots(description: str, priority: str = 'full') -> Tuple[
     all_roots = load_word_roots()
 
     if not all_roots:
-        logger.info("历史词根库为空，返回空列表")
+        logger.info("标准词根库为空，返回空列表")
         return [], "无"
 
     domain_map = classify_roots_by_domain(all_roots)
@@ -2319,336 +2403,6 @@ async def test_connection(req: TestConnectionRequest):
         return TestConnectionResponse(code=500, message=f"连接异常: {str(e)}")
 
 
-@app.post("/api/generate-ddl", response_model=GenerateDDLResponse)
-async def generate_ddl(req: GenerateDDLRequest):
-    total_start_time = datetime.now()
-    abbr_max_len = resolve_abbr_max_len(req.llm_config.abbr_max_len)
-    
-    logger.info("="*50)
-    logger.info("开始生成DDL请求")
-    logger.info(f"数据库类型: {req.db_type}")
-    logger.info(f"建表需求: {req.description[:100]}...")
-
-    step1_start = datetime.now()
-    if req.word_roots_input and req.word_roots_input.content:
-        logger.info("检测到用户上传了新词根，正在合并...")
-        parsed_roots = []
-        if req.word_roots_input.type == "text":
-            parsed_roots = parse_word_roots_text(req.word_roots_input.content)
-        elif req.word_roots_input.type == "file_base64":
-            try:
-                file_data = base64.b64decode(req.word_roots_input.content)
-                parsed_roots = parse_excel_content(file_data)
-            except Exception as e:
-                logger.error(f"词根文件解析失败: {e}")
-
-        if parsed_roots:
-            merge_and_save_roots(parsed_roots)
-            logger.info(f"已合并 {len(parsed_roots)} 条新词根")
-
-    step1_elapsed = (datetime.now() - step1_start).total_seconds()
-
-    step2_start = datetime.now()
-    filtered_roots, word_roots_content = filter_and_prepare_roots(req.description, req.root_match_priority)
-    logger.info(f"词根筛选完成: {len(filtered_roots)} 条")
-    step2_elapsed = (datetime.now() - step2_start).total_seconds()
-
-    db_type_name = {'mysql': 'MySQL', 'postgresql': 'PostgreSQL', 'oracle': 'Oracle'}.get(req.db_type, req.db_type)
-
-    step3_start = datetime.now()
-    
-    standards = load_standards()
-    industry_context = normalize_industry_context(req.llm_config.industry_context)
-    standards_content = merge_standards_with_industry(standards.get('content', ''), industry_context)
-    
-    root_match_name = {'full': '全称', 'abbr': '缩写'}.get(req.root_match_priority, req.root_match_priority)
-    
-    db_example_config = get_db_example(req.db_type, req.root_match_priority)
-    db_example = f"表名格式: {db_example_config['table_format']}\n\n示例DDL:\n{db_example_config['example']}"
-    industry_context_block = build_industry_context_block(industry_context)
-    
-    root_constraints = get_root_constraints(req.root_match_priority, abbr_max_len)
-    root_reuse_principle = get_root_reuse_principle(req.root_match_priority, abbr_max_len)
-    theme_prefix = infer_theme_prefix(req.description, req.db_type, standards_content=standards_content)
-    if theme_prefix:
-        theme_prefix_block = (
-            f"\n\n【主题域缩写】{theme_prefix}"
-            f"\n【主题域缩写规则】\n{render_theme_prefix_guide(standards_content)}"
-            f"\n【表名要求】表名必须使用 分层前缀_业务域_业务名 的结构，例如 dwd_{theme_prefix}_order_detail。"
-        )
-    else:
-        theme_prefix_block = (
-            "\n\n【表名要求】表名必须使用 分层前缀_业务域_业务名 的结构。"
-            "\n未明确命中业务域时，不要默认使用 pub；只能根据表名语义选择一个业务域。"
-        )
-    
-    if req.custom_prompt:
-        logger.info("使用自定义提示词")
-        try:
-            prompt = req.custom_prompt.format(
-                word_roots_content=word_roots_content,
-                description=req.description,
-                industry_context=industry_context,
-                industry_context_block=industry_context_block,
-                db_type=db_type_name,
-                root_match_priority=root_match_name,
-                standards_content=standards_content,
-                db_example=db_example,
-                root_constraints=root_constraints,
-                root_reuse_principle=root_reuse_principle
-            )
-        except KeyError:
-            logger.warning("自定义提示词中缺少必要的占位符，将附加建表需求")
-            prompt = f"{req.custom_prompt}\n\n【建表需求】\n{req.description}\n\n{industry_context_block}\n\n【数据库类型】\n{db_type_name}\n{db_example}\n\n【词根参考】\n{word_roots_content}"
-        
-        # 检查提示词是否包含建表需求信息，如果没有则添加
-        if req.description and req.description not in prompt:
-            logger.info("自定义提示词中未包含建表需求，自动附加")
-            prompt = f"{req.custom_prompt}\n\n【建表需求】\n{req.description}\n\n{industry_context_block}\n\n【数据库类型】\n{db_type_name}\n{db_example}\n\n【词根参考】\n{word_roots_content}"
-        prompt = append_root_mode_constraints(prompt, root_constraints, root_reuse_principle)
-    else:
-        logger.info("使用默认提示词")
-        prompt = USER_PROMPT_TEMPLATE.format(
-            word_roots_content=word_roots_content,
-            description=req.description,
-            industry_context_block=industry_context_block,
-            db_type=db_type_name,
-            root_match_priority=root_match_name,
-            standards_content=standards_content,
-            db_example=db_example,
-            root_constraints=root_constraints,
-            root_reuse_principle=root_reuse_principle
-        )
-
-    prompt = f"{prompt}{theme_prefix_block}"
-    prompt = append_new_roots_instruction(prompt)
-    logger.info(f"提示词长度: {len(prompt)} 字符")
-    step3_elapsed = (datetime.now() - step3_start).total_seconds()
-    logger.info(f"发送请求到 LLM: {req.llm_config.api_url}")
-    logger.info(f"数据库类型: {db_type_name}")
-    logger.info(f"实际提示词内容:\n{prompt[:500]}...")
-
-    llm_start_time = datetime.now()
-
-    headers = {
-        "Authorization": f"Bearer {req.llm_config.api_key}",
-        "Content-Type": "application/json"
-    }
-    
-    system_prompt = get_system_prompt()
-    logger.info(f"System Prompt长度: {len(system_prompt)} 字符")
-    
-    data = {
-        "model": req.llm_config.model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt}
-        ],
-        "max_tokens": 2048,
-        "temperature": req.llm_config.temperature
-    }
-    
-    data = add_deepseek_thinking_body(req.llm_config.api_url, data)
-    max_retries = 3
-    retry_delay = 5
-    response_content = None
-    
-    for attempt in range(max_retries):
-        try:
-            logger.info(f"开始发送LLM请求（第 {attempt + 1} 次）...")
-            
-            response = requests_session.post(
-                build_llm_url(req.llm_config.api_url),
-                headers=headers,
-                json=data,
-                timeout=300
-            )
-            
-            if response.status_code == 200:
-                response.encoding = 'utf-8'
-                result = response.json()
-                response_content = extract_llm_content(result)
-                logger.info(f"LLM响应成功，内容长度: {len(response_content)} 字符")
-                break
-            elif response.status_code in [429, 500, 502, 503, 504]:
-                logger.warning(f"LLM请求失败，状态码: {response.status_code}，准备重试...")
-                if attempt < max_retries - 1:
-                    import time
-                    time.sleep(retry_delay * (attempt + 1))
-            else:
-                logger.error(f"LLM请求失败，状态码: {response.status_code}")
-                break
-        except Exception as e:
-            logger.warning(f"LLM请求异常: {e}，准备重试...")
-            if attempt < max_retries - 1:
-                import time
-                time.sleep(retry_delay * (attempt + 1))
-    
-    llm_elapsed = (datetime.now() - llm_start_time).total_seconds()
-    step4_start = datetime.now()
-    
-    content = ""
-    new_roots = []
-    violations = []
-    
-    try:
-        if response_content is not None:
-            content = re.sub(r'```sql\s*', '', response_content)
-            content = re.sub(r'\s*```', '\n', content)
-            
-            is_valid, clean_content = clean_ddl_response(content, "单独建表")
-            
-            if not is_valid:
-                logger.warning(f"单独建表: {clean_content}")
-                return GenerateDDLResponse(
-                    code=1,
-                    data=clean_content,
-                    extracted_roots=[],
-                    violations=[],
-                    message=clean_content
-                )
-            
-            content = clean_content
-            
-            all_roots = load_word_roots()
-            new_roots = extract_new_roots_from_response(content, all_roots)
-            content = remove_new_roots_markers(content)
-            
-            logger.info(f"检测到 {len(new_roots)} 个新词根，将返回给前端由用户确认保存")
-            
-            violations = []
-            
-            if req.enable_validation:
-                validator = DDLValidator(
-                    word_roots=load_word_roots(),
-                    standards=load_standards(),
-                    root_match_priority=req.root_match_priority,
-                    abbr_max_len=abbr_max_len,
-                )
-                violations = validator.validate(content, req.db_type)
-                
-                if violations:
-                    error_count = sum(1 for v in violations if v['level'] == 'error')
-                    logger.info(f"检测到 {len(violations)} 个规范违规（{error_count} 个错误，{len(violations)-error_count} 个警告）")
-                    
-                    logger.info("【违规详情】")
-                    for i, v in enumerate(violations, 1):
-                        logger.info(f"  [{i}] [{v['level']}] {v['rule']}: {v['message']}")
-                    
-                    if error_count > 0:
-                        max_correction_attempts = 3
-                        correction_attempt = 0
-                        correction_history = []
-                        
-                        while correction_attempt < max_correction_attempts and error_count > 0:
-                            correction_attempt += 1
-                            logger.info(f"开始第{correction_attempt}次纠正...")
-                            
-                            fix_prompt = validator.generate_fix_prompt(content, violations, correction_attempt)
-                            llm_correction_start_time = datetime.now()
-                            
-                            data = {
-                                "model": req.llm_config.model,
-                                "messages": [
-                                    {"role": "system", "content": system_prompt},
-                                    {"role": "user", "content": fix_prompt}
-                                ],
-                                "max_tokens": 2048,
-                                "temperature": req.llm_config.temperature
-                            }
-                            
-                            data = add_deepseek_thinking_body(req.llm_config.api_url, data)
-                            response = requests_session.post(
-                                build_llm_url(req.llm_config.api_url),
-                                headers=headers,
-                                json=data,
-                                timeout=300
-                            )
-                            
-                            if response.status_code == 200:
-                                response.encoding = 'utf-8'
-                                result = response.json()
-                                content = extract_llm_content(result)
-                                content = re.sub(r'```sql\s*', '', content)
-                                content = re.sub(r'\s*```', '\n', content)
-                                
-                                violations = validator.validate(content, req.db_type)
-                                error_count = sum(1 for v in violations if v['level'] == 'error')
-                                warning_count = len(violations) - error_count
-                                
-                                llm_correction_elapsed = (datetime.now() - llm_correction_start_time).total_seconds()
-                                correction_history.append({
-                                    'attempt': correction_attempt,
-                                    'elapsed': llm_correction_elapsed,
-                                    'error_count': error_count,
-                                    'warning_count': warning_count
-                                })
-                                
-                                if error_count > 0:
-                                    logger.info(f"第{correction_attempt}次纠正后仍有 {error_count} 个错误")
-                                else:
-                                    logger.info(f"第{correction_attempt}次纠正成功，所有错误已修复")
-                                    break
-                            else:
-                                logger.error(f"第{correction_attempt}次纠正请求失败: {response.status_code}")
-                                break
-                        
-                        if correction_history:
-                            logger.info("【修正历史】")
-                            for record in correction_history:
-                                logger.info(
-                                    f"  第{record['attempt']}轮: "
-                                    f"耗时{record['elapsed']:.2f}秒, "
-                                    f"错误{record['error_count']}个, "
-                                    f"警告{record['warning_count']}个"
-                                )
-                        
-                        if error_count > 0 and correction_attempt >= max_correction_attempts:
-                            logger.warning(f"经过{max_correction_attempts}轮纠正，仍存在 {error_count} 个错误")
-            else:
-                logger.info("跳过三层校验")
-        
-        step4_elapsed = (datetime.now() - step4_start).total_seconds()
-        total_elapsed = (datetime.now() - total_start_time).total_seconds()
-        
-        logger.info("="*50)
-        logger.info("【性能分析】各阶段耗时:")
-        logger.info(f"  本地处理-词根合并: {step1_elapsed:.3f}秒")
-        logger.info(f"  本地处理-词根筛选: {step2_elapsed:.3f}秒")
-        logger.info(f"  本地处理-Prompt组装: {step3_elapsed:.3f}秒")
-        logger.info(f"  LLM模型推理耗时: {llm_elapsed:.2f}秒")
-        logger.info(f"  本地处理-响应解析: {step4_elapsed:.3f}秒")
-        logger.info(f"  总耗时: {total_elapsed:.2f}秒")
-        logger.info("="*50)
-        
-        if response_content is None:
-            return GenerateDDLResponse(code=1, data="", extracted_roots=[], violations=[], message="LLM request failed or returned no content")
-
-        if not content.strip():
-            return GenerateDDLResponse(code=1, data="", extracted_roots=[], violations=[], message="LLM returned no final content")
-
-        response_data = {
-            "code": 0 if not violations or sum(1 for v in violations if v['level'] == 'error') == 0 else 1,
-            "data": content,
-            "extracted_roots": new_roots,
-            "violations": violations
-        }
-        
-        return GenerateDDLResponse(
-            code=response_data["code"],
-            data=content,
-            extracted_roots=new_roots,
-            violations=violations if violations else [],
-            message="合规生成完成" if not violations else f"生成完成但存在 {len(violations)} 个违规项"
-        )
-    except Exception as e:
-        llm_elapsed = (datetime.now() - llm_start_time).total_seconds()
-        total_elapsed = (datetime.now() - total_start_time).total_seconds()
-        logger.error(f"请求异常（耗时 {total_elapsed:.2f}秒，LLM耗时 {llm_elapsed:.2f}秒）: {e}")
-        logger.error(f"堆栈信息: {traceback.format_exc()}")
-        return GenerateDDLResponse(code=500, data="", message=f"请求异常: {str(e)}")
-
-
 @app.post("/api/parse-file")
 async def parse_file(file: UploadFile = File(...), parse_type: str = Form("auto")):
     logger.info(f"解析文件请求: {file.filename}, 解析类型: {parse_type}")
@@ -3476,6 +3230,53 @@ async def list_log_files():
         return {"code": 1, "message": str(e)}
 
 
+@app.get("/api/prompt-segments")
+async def get_prompt_segments_api():
+    logger.info("获取分段提示词配置请求")
+    data, migration_notice = load_prompt_segments_response(BASE_DIR)
+    return {"code": 0, "data": data, "migration_notice": migration_notice}
+
+
+@app.post("/api/prompt-segments")
+async def save_prompt_segments_api(data: dict = Body(...)):
+    logger.info("保存分段提示词配置请求")
+    try:
+        segments = data.get("segments", [])
+        saved = save_prompt_segments(BASE_DIR, segments)
+        return {"code": 0, "message": "分段提示词保存成功", "data": saved}
+    except ValueError as e:
+        return {"code": 1, "message": str(e)}
+
+
+@app.put("/api/prompt-segments/{segment_key}")
+async def save_prompt_segment_api(segment_key: str, data: dict = Body(...)):
+    logger.info(f"保存单段提示词配置请求: {segment_key}")
+    try:
+        saved = save_prompt_segment(BASE_DIR, segment_key, data)
+        return {"code": 0, "message": "本段提示词保存成功", "data": saved}
+    except KeyError:
+        return {"code": 1, "message": f"未知提示词分段: {segment_key}"}
+    except ValueError as e:
+        return {"code": 1, "message": str(e)}
+
+
+@app.post("/api/prompt-segments/reset")
+async def reset_prompt_segments_api():
+    logger.info("重置分段提示词为内置默认")
+    defaults = reset_prompt_segments(BASE_DIR)
+    return {"code": 0, "message": "已重置为内置默认分段提示词", "data": defaults}
+
+
+@app.post("/api/prompt-segments/{segment_key}/reset")
+async def reset_prompt_segment_api(segment_key: str):
+    logger.info(f"重置单段提示词为内置默认: {segment_key}")
+    try:
+        defaults = reset_prompt_segment(BASE_DIR, segment_key)
+        return {"code": 0, "message": "本段已恢复内置提示词", "data": defaults}
+    except KeyError:
+        return {"code": 1, "message": f"未知提示词分段: {segment_key}"}
+
+
 @app.get("/api/logs/file/{filename}")
 async def get_log_file(filename: str):
     logger.info(f"读取日志文件: {filename}")
@@ -3784,27 +3585,10 @@ def normalize_single_table_schema(parsed_schema: dict) -> dict:
 
 
 def parse_single_text_to_table_schema(description: str, llm_config, db_type: str) -> dict:
-    prompt = f"""请从下面的中文建表需求中提取单张表的结构化定义，并严格只输出 JSON 对象，不要输出解释。
-
-要求：
-1. 只能提取 1 张表；如果文本中明显描述了多张表，也仍只允许返回 1 张表，否则视为失败。
-2. JSON 格式必须为：
-{{
-  "table_name": "中文表名",
-  "layer": "ods|dim|dwd|dws|ads|input|",
-  "user_specified_subject_domain": "主题域缩写或空字符串",
-  "fields": [
-    {{"name": "中文字段名", "type": "字段类型或空字符串"}}
-  ]
-}}
-3. 如果字段类型无法明确判断，type 返回空字符串。
-4. 不要生成英文表名或英文字段名。
-
-数据库类型：{db_type}
-
-建表需求：
-{description}
-"""
+    prompt_segment = render_prompt_segment(BASE_DIR, "text_schema_extract", {
+        "db_type": db_type,
+        "description": description,
+    })
 
     headers = {
         "Authorization": f"Bearer {llm_config.api_key}",
@@ -3813,8 +3597,8 @@ def parse_single_text_to_table_schema(description: str, llm_config, db_type: str
     data = {
         "model": llm_config.model,
         "messages": [
-            {"role": "system", "content": "你是结构化信息抽取助手，只返回合法 JSON 对象。"},
-            {"role": "user", "content": prompt}
+            {"role": "system", "content": prompt_segment["system_prompt"]},
+            {"role": "user", "content": prompt_segment["user_prompt"]}
         ],
         "max_tokens": 2048,
         "temperature": 0
@@ -4079,6 +3863,7 @@ def run_structured_ddl_task(task_id: str, tables: dict, api_key: str, api_url: s
                             abbr_max_len: int = DEFAULT_ABBR_MAX_LEN, industry_context: str = "",
                             history_type: str = "batch", history_description: str = "", input_stage_label: str = "解析Excel文件..."):
     start_time = datetime.now()
+    ensure_task_not_cancelled(task_id)
     abbr_max_len = resolve_abbr_max_len(abbr_max_len)
     standards = load_standards()
     industry_context = normalize_industry_context(industry_context)
@@ -4111,7 +3896,9 @@ def run_structured_ddl_task(task_id: str, tables: dict, api_key: str, api_url: s
         standards=standards_content,
         industry_context=industry_context,
         abbr_max_len=abbr_max_len,
-        input_stage_label=input_stage_label
+        input_stage_label=input_stage_label,
+        prompt_segments_base_dir=BASE_DIR,
+        should_cancel=lambda: is_task_cancelled(task_id)
     )
 
     results = {}
@@ -4120,8 +3907,10 @@ def run_structured_ddl_task(task_id: str, tables: dict, api_key: str, api_url: s
     all_new_roots = []
 
     try:
+        ensure_task_not_cancelled(task_id)
         tables_data, field_mapping, field_stats, root_translations = field_processor.build_field_mapping(tables_data=tables)
         logger.info(f"字段映射构建完成，共 {len(field_mapping)} 个字段映射")
+        ensure_task_not_cancelled(task_id)
         results = field_processor.generate_all_ddl(tables_data, field_mapping, db_type, root_match_priority, standards_content)
         field_level_errors = [
             f"{table_name}: {ddl_content.replace('-- 生成失败:', '').strip()}"
@@ -4167,16 +3956,21 @@ def run_structured_ddl_task(task_id: str, tables: dict, api_key: str, api_url: s
             total_fields=field_stats.get("total_fields") if field_stats else None,
             field_progress=completed_field_progress
         )
+        ensure_task_not_cancelled(task_id)
+    except BatchTaskCancelledError:
+        logger.info(f"任务 {task_id} 已终止，停止后续处理")
+        mark_task_cancelled(task_id)
+        return
     except Exception as e:
         elapsed_time = (datetime.now() - start_time).total_seconds()
         logger.error(f"字段级处理失败，终止任务: {e}")
-        task_results[task_id] = {
-            "code": 1,
-            "message": f"字段级主流程失败: {str(e)}",
-            "elapsed_time": elapsed_time,
-            "errors": errors.copy()
-        }
-        task_validation_flags.pop(task_id, None)
+        mark_task_failed(
+            task_id,
+            f"字段级主流程失败: {str(e)}",
+            errors=errors.copy(),
+            elapsed_time=elapsed_time,
+            stage="❌ 字段级处理失败"
+        )
         return
 
     deduplicated_new_roots = []
@@ -4208,6 +4002,7 @@ def run_structured_ddl_task(task_id: str, tables: dict, api_key: str, api_url: s
     }
 
     if enable_validation and valid_results:
+        ensure_task_not_cancelled(task_id)
         update_progress(task_id, 7, 8, stage="🔍 统一校验中...")
         logger.info(f"开始统一校验，共 {len(valid_results)} 张表")
 
@@ -4231,6 +4026,7 @@ def run_structured_ddl_task(task_id: str, tables: dict, api_key: str, api_url: s
             warning_count = validation_result['warning_count']
 
             if error_count > 0:
+                ensure_task_not_cancelled(task_id)
                 update_progress(task_id, 7, 8, stage="🔧 统一修正中...")
                 try:
                     parsed_tables = unified_validator.parse_all_ddl(valid_results)
@@ -4240,17 +4036,39 @@ def run_structured_ddl_task(task_id: str, tables: dict, api_key: str, api_url: s
                     )
                     if error_fields:
                         fix_prompt = unified_validator.generate_field_fix_prompt(error_fields)
+                        field_fix_lines = []
+                        for table_name, fields in error_fields.items():
+                            for _, info in fields.items():
+                                violations_text = "\n".join([
+                                    f"  - {v['message']}" for v in info['violations']
+                                ])
+                                field_fix_lines.append(f"""表: {table_name}
+字段序号: {info.get('field_index') or ''}
+当前字段: {info['current_name']}
+中文注释: {info['comment']}
+jieba分词词根: {', '.join(info.get('token_roots') or [])}
+违规问题:
+{violations_text}
+""")
+                        fix_prompt_segment = render_prompt_segment(BASE_DIR, "validation_field_fix", {
+                            "get_system_prompt": get_system_prompt(),
+                            "fields_text": "\n".join(field_fix_lines),
+                            "roots_text": ", ".join(unified_validator.get_available_roots_for_mode()),
+                            "root_mode_block": unified_validator.get_root_mode_prompt_block(),
+                        })
+                        fix_prompt = fix_prompt_segment["user_prompt"] or fix_prompt
                         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
                         fix_data = {
                             "model": model,
                             "messages": [
-                                {"role": "system", "content": get_system_prompt()},
+                                {"role": "system", "content": fix_prompt_segment["system_prompt"] or get_system_prompt()},
                                 {"role": "user", "content": fix_prompt}
                             ],
                             "max_tokens": 2048,
                             "temperature": temperature
                         }
                         fix_data = add_deepseek_thinking_body(api_url, fix_data)
+                        ensure_task_not_cancelled(task_id)
                         fix_response = requests_session.post(
                             build_llm_url(api_url),
                             headers=headers,
@@ -4329,10 +4147,8 @@ def run_structured_ddl_task(task_id: str, tables: dict, api_key: str, api_url: s
         "data": result_data
     }
     update_progress(task_id, 8, 8, stage="✅ 完成建表")
-    task_validation_flags.pop(task_id, None)
-    if task_id in progress_store:
-        del progress_store[task_id]
-        logger.info(f"任务 {task_id} 进度数据已清除")
+    cleanup_task_runtime(task_id)
+    logger.info(f"任务 {task_id} 进度数据已清除")
 
 
 def process_batch_task(task_id: str, content: bytes, api_key: str, api_url: str, model: str, db_type: str,
@@ -4341,18 +4157,17 @@ def process_batch_task(task_id: str, content: bytes, api_key: str, api_url: str,
                        abbr_max_len: int = DEFAULT_ABBR_MAX_LEN, industry_context: str = "", use_field_level: bool = True):
     start_time = datetime.now()
     try:
+        ensure_task_not_cancelled(task_id)
         tables = parse_batch_table_excel(content)
         if not tables:
             raise ValueError("未解析到有效的表数据")
+    except BatchTaskCancelledError:
+        mark_task_cancelled(task_id)
+        return
     except Exception as e:
         elapsed_time = (datetime.now() - start_time).total_seconds()
         logger.error(f"Excel解析失败: {e}，耗时: {elapsed_time:.2f}秒")
-        task_results[task_id] = {
-            "code": 1,
-            "message": f"Excel解析失败: {str(e)}",
-            "elapsed_time": elapsed_time
-        }
-        task_validation_flags.pop(task_id, None)
+        mark_task_failed(task_id, f"Excel解析失败: {str(e)}", elapsed_time=elapsed_time, stage="❌ Excel解析失败")
         return
 
     run_structured_ddl_task(
@@ -4370,19 +4185,18 @@ def process_text_generate_task(req: TextGenerateTaskRequest):
     update_progress(task_id, 1, 8, stage="输入解析中...", source_label="输入解析")
 
     try:
+        ensure_task_not_cancelled(task_id)
         tables = parse_single_text_to_table_schema(req.description, req.llm_config, req.db_type)
         if len(tables) != 1:
             raise ValueError("输入解析返回了多张表")
         update_progress(task_id, 1, 8, stage="输入解析完成", source_label="输入解析")
+    except BatchTaskCancelledError:
+        mark_task_cancelled(task_id)
+        return
     except Exception as e:
         elapsed_time = (datetime.now() - start_time).total_seconds()
         logger.error(f"输入解析失败: {e}")
-        task_results[task_id] = {
-            "code": 1,
-            "message": f"输入解析失败: {str(e)}",
-            "elapsed_time": elapsed_time
-        }
-        task_validation_flags.pop(task_id, None)
+        mark_task_failed(task_id, f"输入解析失败: {str(e)}", elapsed_time=elapsed_time, stage="❌ 输入解析失败")
         return
 
     run_structured_ddl_task(
@@ -4418,15 +4232,14 @@ async def batch_generate_ddl(
     
     if not task_id:
         return {"code": 1, "message": "缺少任务ID"}
-    
-    if task_id in batch_cache:
-        logger.info(f"新上传文件，清除旧缓存 {task_id}，从头开始")
-        del batch_cache[task_id]
+
+    cleanup_task_runtime(task_id, clear_result=True)
     task_validation_flags[task_id] = enable_validation
-    
+    task_cancel_flags[task_id] = False
+
     content = await file.read()
-    
-    asyncio.get_event_loop().run_in_executor(executor, process_batch_task, task_id, content, api_key, api_url, model, db_type, root_match_priority, custom_prompt, enable_validation, max_workers, temperature, cut_mode, abbr_max_len, industry_context)
+
+    submit_background_task(process_batch_task, task_id, content, api_key, api_url, model, db_type, root_match_priority, custom_prompt, enable_validation, max_workers, temperature, cut_mode, abbr_max_len, industry_context)
 
     return {"code": 0, "message": "任务已启动", "data": {"task_id": task_id, "enable_validation": enable_validation, "max_workers": max_workers, "abbr_max_len": abbr_max_len}}
 
@@ -4438,9 +4251,11 @@ async def text_generate_ddl_task(req: TextGenerateTaskRequest):
         f"文本生成DDL任务启动 - 任务ID: {task_id}, 数据库类型: {req.db_type}, "
         f"词根模式: {req.root_match_priority}, 分词模式: {req.cut_mode}, 三层校验: {'启用' if req.enable_validation else '禁用'}"
     )
+    cleanup_task_runtime(task_id, clear_result=True)
     task_validation_flags[task_id] = req.enable_validation
+    task_cancel_flags[task_id] = False
     payload = req.model_copy(update={"task_id": task_id})
-    asyncio.get_event_loop().run_in_executor(executor, process_text_generate_task, payload)
+    submit_background_task(process_text_generate_task, payload)
     return {"code": 0, "message": "任务已启动", "data": {"task_id": task_id, "enable_validation": req.enable_validation, "max_workers": 1, "abbr_max_len": req.llm_config.abbr_max_len}}
 
 
@@ -4455,7 +4270,13 @@ async def get_batch_result(task_id: str):
 @app.post("/api/batch-task/{task_id}/cancel")
 async def cancel_batch_task(task_id: str):
     logger.info(f"终止任务请求: {task_id}")
+    existing_result = task_results.get(task_id)
+    if existing_result and existing_result.get("code") == 0:
+        return {"code": 1, "message": "任务已完成，无需终止"}
+    if task_id not in progress_store and task_id not in task_results:
+        return {"code": 1, "message": "任务不存在或已结束"}
     task_cancel_flags[task_id] = True
+    mark_task_cancelled(task_id)
     return {"code": 0, "message": "任务已终止"}
 
 
@@ -4605,6 +4426,20 @@ async def download_history_ddl(record_id: str):
 
 @app.get("/api/progress/{task_id}")
 async def get_progress(task_id: str):
+    result = task_results.get(task_id)
+    if result and result.get("code") == 1:
+        return {
+            "code": 0,
+            "data": {
+                "current": 8,
+                "total": 8,
+                "stage": "⛔ 任务已终止" if result.get("cancelled") else f"❌ {result.get('message', '任务失败')}",
+                "overall_progress": 100,
+                "failed": not result.get("cancelled", False),
+                "cancelled": result.get("cancelled", False),
+                "message": result.get("message", "任务失败")
+            }
+        }
     progress = progress_store.get(task_id)
     if progress:
         cached = batch_cache.get(task_id)
@@ -4730,6 +4565,7 @@ else:
         logger.warning(f'  已检查路径: {candidate}')
     logger.warning('  开发环境请先构建前端，打包环境请确保 frontend 或 frontend/dist 随程序分发')
     logger.warning('=' * 60)
+
 
 
 

@@ -1,0 +1,1198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>数仓建表助手 - UI Redesign Demo</title>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <style>
+    :root {
+      --brand-900: #07336f;
+      --brand-800: #0c4a9a;
+      --brand-700: #1467d8;
+      --brand-600: #1f7aea;
+      --brand-500: #2f8fff;
+      --brand-100: #e8f3ff;
+      --brand-50: #f5f9ff;
+      --cyan: #13b5d1;
+      --green: #20b26b;
+      --orange: #f59e0b;
+      --red: #e5484d;
+      --ink-900: #152033;
+      --ink-700: #344054;
+      --ink-500: #667085;
+      --ink-300: #98a2b3;
+      --line: #dbe7f5;
+      --line-strong: #c3d7ee;
+      --panel: #ffffff;
+      --page: #f4f8fd;
+      --shadow: 0 10px 26px rgba(16, 82, 160, 0.08);
+      --radius: 8px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink-900);
+      background:
+        linear-gradient(180deg, rgba(232, 243, 255, 0.92), rgba(244, 248, 253, 0.8) 260px),
+        var(--page);
+      font-family: "Inter", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      letter-spacing: 0;
+    }
+
+    button, input, select, textarea { font: inherit; }
+
+    .app-wrapper {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 240px minmax(0, 1fr);
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      background: linear-gradient(180deg, #0b438d 0%, #082f6e 100%);
+      color: #fff;
+      padding: 18px 14px;
+      border-right: 1px solid rgba(255, 255, 255, 0.16);
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 8px 18px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+    }
+
+    .logo-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: var(--radius);
+      display: grid;
+      place-items: center;
+      color: var(--brand-800);
+      background: linear-gradient(135deg, #fff, #cbe8ff);
+      box-shadow: 0 10px 22px rgba(0, 0, 0, 0.16);
+    }
+
+    .logo-text {
+      font-size: 16px;
+      font-weight: 760;
+      line-height: 1.25;
+    }
+
+    .logo-sub {
+      margin-top: 3px;
+      color: rgba(255, 255, 255, 0.65);
+      font-size: 11px;
+    }
+
+    .nav-menu {
+      display: grid;
+      gap: 5px;
+      margin-top: 18px;
+    }
+
+    .nav-item {
+      width: 100%;
+      height: 44px;
+      border: 0;
+      border-radius: var(--radius);
+      background: transparent;
+      color: rgba(255, 255, 255, 0.78);
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      padding: 0 12px;
+      cursor: pointer;
+      text-align: left;
+      transition: 150ms ease;
+    }
+
+    .nav-item:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .nav-item.active {
+      color: #fff;
+      background: linear-gradient(90deg, rgba(255,255,255,0.24), rgba(255,255,255,0.08));
+      box-shadow: inset 3px 0 0 #7bdcff;
+    }
+
+    .nav-icon, .icon-box {
+      width: 20px;
+      height: 20px;
+      display: inline-grid;
+      place-items: center;
+      flex: 0 0 auto;
+    }
+
+    svg { width: 18px; height: 18px; stroke-width: 2; }
+
+    .sidebar-note {
+      position: absolute;
+      left: 14px;
+      right: 14px;
+      bottom: 18px;
+      padding: 12px;
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.1);
+      color: rgba(255, 255, 255, 0.76);
+      font-size: 12px;
+      line-height: 1.65;
+    }
+
+    .main-container {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      height: 64px;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(255, 255, 255, 0.78);
+      border-bottom: 1px solid rgba(195, 215, 238, 0.72);
+      backdrop-filter: blur(12px);
+    }
+
+    .header-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 18px;
+      font-weight: 760;
+    }
+
+    .header-title::before {
+      content: "";
+      width: 4px;
+      height: 18px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, var(--brand-500), var(--cyan));
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .content {
+      width: min(1480px, 100%);
+      margin: 0 auto;
+      padding: 22px 24px 34px;
+    }
+
+    .page-intro {
+      margin-bottom: 16px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 18px;
+      align-items: end;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--brand-700);
+      font-size: 12px;
+      font-weight: 760;
+      margin-bottom: 7px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.28;
+      font-weight: 780;
+    }
+
+    .intro-text {
+      margin: 7px 0 0;
+      color: var(--ink-500);
+      line-height: 1.65;
+      font-size: 14px;
+    }
+
+    .page { display: none; }
+    .page.active { display: block; }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .panel + .panel { margin-top: 16px; }
+
+    .panel-header {
+      min-height: 52px;
+      padding: 13px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #fff, #f8fbff);
+    }
+
+    .card-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 15px;
+      font-weight: 760;
+    }
+
+    .panel-body {
+      padding: 16px;
+    }
+
+    .layout-2 {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(360px, 0.72fr);
+      gap: 16px;
+    }
+
+    .standards-layout {
+      display: grid;
+      grid-template-columns: minmax(420px, 0.9fr) minmax(0, 1.1fr);
+      gap: 16px;
+    }
+
+    .governance-panels {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 16px;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .field { display: grid; gap: 7px; }
+    .field.full { grid-column: 1 / -1; }
+
+    label, .config-label {
+      color: var(--ink-700);
+      font-size: 12px;
+      font-weight: 760;
+    }
+
+    input, select, textarea {
+      width: 100%;
+      min-height: 36px;
+      padding: 8px 11px;
+      color: var(--ink-900);
+      background: #fff;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      outline: none;
+      transition: 140ms ease;
+    }
+
+    textarea {
+      resize: vertical;
+      line-height: 1.6;
+    }
+
+    input:focus, select:focus, textarea:focus {
+      border-color: var(--brand-500);
+      box-shadow: 0 0 0 3px rgba(47, 143, 255, 0.14);
+    }
+
+    .btn {
+      min-height: 34px;
+      border: 1px solid transparent;
+      border-radius: var(--radius);
+      padding: 0 13px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+      white-space: nowrap;
+      background: #fff;
+    }
+
+    .btn-primary {
+      color: #fff;
+      background: linear-gradient(135deg, var(--brand-700), var(--brand-500));
+      box-shadow: 0 8px 18px rgba(31, 122, 234, 0.2);
+    }
+
+    .btn-success { color: #fff; background: linear-gradient(135deg, #18a463, #20c777); }
+    .btn-danger { color: #fff; background: linear-gradient(135deg, #d93c42, #ef6367); }
+    .btn-warning { color: #fff; background: linear-gradient(135deg, #e79005, #f8b43c); }
+    .btn-plain { color: var(--brand-800); border-color: var(--line-strong); }
+    .btn-link { padding: 0 4px; min-height: 24px; color: var(--brand-700); border: 0; background: transparent; }
+    .btn-link.danger { color: var(--red); }
+
+    .config-selector, .config-row, .action-row, .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .config-selector { margin-bottom: 16px; }
+    .config-row { padding: 13px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--brand-50); }
+    .action-row { margin-top: 14px; }
+    .toolbar { margin-bottom: 12px; justify-content: space-between; }
+
+    .config-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .config-hint {
+      color: var(--ink-300);
+      font-size: 12px;
+    }
+
+    .slider-wrap {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 74px;
+      gap: 12px;
+      align-items: center;
+    }
+
+    input[type="range"] { padding: 0; accent-color: var(--brand-600); }
+
+    .hint-box {
+      color: var(--ink-500);
+      background: #f8fbff;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 11px 12px;
+      line-height: 1.65;
+      font-size: 13px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      font-size: 13px;
+    }
+
+    th {
+      text-align: left;
+      padding: 11px 12px;
+      color: var(--ink-500);
+      background: #f3f8ff;
+      border-bottom: 1px solid var(--line);
+      font-size: 12px;
+      font-weight: 760;
+    }
+
+    td {
+      padding: 12px;
+      color: var(--ink-700);
+      border-bottom: 1px solid #edf3fb;
+      vertical-align: middle;
+    }
+
+    tbody tr:hover td { background: #f8fbff; }
+
+    .table-wrap {
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 22px;
+      padding: 0 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 740;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+
+    .tag-blue { color: var(--brand-700); background: var(--brand-100); border-color: #c8e2ff; }
+    .tag-green { color: var(--green); background: #ecf9f2; border-color: #c8efd9; }
+    .tag-orange { color: #b87505; background: #fff7e6; border-color: #ffe2a3; }
+    .tag-red { color: var(--red); background: #fff0f0; border-color: #ffd2d2; }
+    .tag-gray { color: var(--ink-500); background: #f3f5f8; border-color: #e2e8f0; }
+
+    .segment {
+      display: inline-flex;
+      padding: 3px;
+      gap: 2px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--brand-50);
+    }
+
+    .segment button {
+      height: 30px;
+      border: 0;
+      border-radius: 6px;
+      padding: 0 12px;
+      color: var(--ink-500);
+      background: transparent;
+      cursor: pointer;
+      font-weight: 700;
+      font-size: 12px;
+    }
+
+    .segment button.active {
+      color: var(--brand-700);
+      background: #fff;
+      box-shadow: 0 2px 8px rgba(18, 74, 156, 0.08);
+    }
+
+    .upload-section {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px;
+      border: 1px dashed #9ec9f8;
+      border-radius: var(--radius);
+      background: linear-gradient(180deg, #f8fcff, #f1f7ff);
+    }
+
+    .file-info {
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .progress-card {
+      margin-top: 14px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #f8fbff;
+    }
+
+    .progress-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .progress-title { font-weight: 760; }
+    .progress-text { color: var(--brand-700); font-weight: 760; }
+
+    .progress-bar {
+      height: 9px;
+      border-radius: 999px;
+      background: #e4f0ff;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      width: 78%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--brand-700), var(--cyan));
+    }
+
+    .milestone-track {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(92px, 1fr));
+      gap: 8px;
+      margin-top: 14px;
+      overflow: auto;
+    }
+
+    .milestone-item {
+      min-height: 78px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+    }
+
+    .milestone-item.done { border-color: #c8efd9; background: #f2fbf6; }
+    .milestone-item.active { border-color: #9ec9f8; background: #f0f7ff; box-shadow: inset 0 0 0 1px #9ec9f8; }
+    .milestone-step { color: var(--ink-300); font-size: 11px; font-weight: 760; }
+    .milestone-title { margin-top: 6px; color: var(--ink-700); font-size: 12px; font-weight: 760; }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .stat-item {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      text-align: center;
+    }
+
+    .stat-value {
+      color: var(--brand-700);
+      font-size: 24px;
+      font-weight: 800;
+    }
+
+    .stat-label {
+      color: var(--ink-500);
+      font-size: 12px;
+      margin-top: 5px;
+    }
+
+    .new-roots-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .sql-output {
+      min-height: 300px;
+      margin: 0;
+      padding: 16px;
+      overflow: auto;
+      border-radius: var(--radius);
+      border: 1px solid #183d6c;
+      color: #d8e8ff;
+      background: #0d203c;
+      font-family: "JetBrains Mono", Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.8;
+      white-space: pre;
+    }
+
+    .empty-state {
+      padding: 34px 16px;
+      text-align: center;
+      color: var(--ink-500);
+      background: #f8fbff;
+      border: 1px dashed var(--line-strong);
+      border-radius: var(--radius);
+    }
+
+    .preview-content {
+      min-height: 420px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #f8fbff;
+      color: var(--ink-700);
+      line-height: 1.75;
+      font-size: 13px;
+    }
+
+    .search-input {
+      max-width: 320px;
+      position: relative;
+      flex: 1;
+    }
+
+    .search-input input { padding-left: 34px; }
+    .search-input svg {
+      position: absolute;
+      left: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--ink-300);
+      width: 16px;
+      height: 16px;
+    }
+
+    .dialog-demo {
+      margin-top: 16px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: #fff;
+    }
+
+    .dialog-head {
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--line);
+      background: #f8fbff;
+      font-weight: 760;
+    }
+
+    .segment-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .segment-card {
+      min-height: 132px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      display: grid;
+      align-content: start;
+      gap: 8px;
+      cursor: pointer;
+      transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
+    }
+
+    .segment-card.active,
+    .segment-card:hover {
+      border-color: #9ec9f8;
+      background: #f4f9ff;
+      box-shadow: inset 0 0 0 1px #9ec9f8;
+    }
+
+    .segment-card-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 780;
+      color: var(--ink-900);
+    }
+
+    .segment-card-stage {
+      color: var(--brand-700);
+      font-size: 12px;
+      font-weight: 700;
+      word-break: break-all;
+    }
+
+    .segment-card-note {
+      color: var(--ink-500);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .config-split {
+      display: grid;
+      gap: 16px;
+    }
+
+    .footer {
+      padding: 12px 24px 24px;
+      color: var(--ink-300);
+      text-align: center;
+      font-size: 12px;
+    }
+
+    @media (max-width: 1180px) {
+      .layout-2, .standards-layout, .governance-panels { grid-template-columns: 1fr; }
+      .page-intro { grid-template-columns: 1fr; }
+      .milestone-track { grid-template-columns: repeat(4, minmax(92px, 1fr)); }
+      .segment-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 820px) {
+      .app-wrapper { grid-template-columns: 1fr; }
+      .sidebar { position: relative; height: auto; }
+      .sidebar-note { position: static; margin-top: 16px; }
+      .nav-menu { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .header { position: relative; padding: 0 16px; }
+      .content { padding: 18px 16px 28px; }
+      .form-grid, .stat-grid { grid-template-columns: 1fr; }
+      .segment-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-wrapper">
+    <aside class="sidebar">
+      <div class="logo">
+        <div class="logo-icon"><i data-lucide="database-zap"></i></div>
+        <div>
+          <div class="logo-text">数仓建表助手</div>
+          <div class="logo-sub">AI DDL Workbench</div>
+        </div>
+      </div>
+      <nav class="nav-menu">
+        <button class="nav-item active" data-page="config"><span class="nav-icon"><i data-lucide="clipboard-list"></i></span><span>基础配置</span></button>
+        <button class="nav-item" data-page="standards"><span class="nav-icon"><i data-lucide="scroll-text"></i></span><span>规范管理</span></button>
+        <button class="nav-item" data-page="batch"><span class="nav-icon"><i data-lucide="zap"></i></span><span>建表生成</span></button>
+        <button class="nav-item" data-page="history"><span class="nav-icon"><i data-lucide="history"></i></span><span>建表历史</span></button>
+        <button class="nav-item" data-page="governance"><span class="nav-icon"><i data-lucide="bar-chart-3"></i></span><span>词根治理</span></button>
+      </nav>
+      <div class="sidebar-note">本页面是基于当前 App 功能的一版 UI 外观稿，只调整视觉与布局表达，不新增业务模块。</div>
+    </aside>
+
+    <div class="main-container">
+      <header class="header">
+        <div class="header-title" id="headerTitle">基础配置</div>
+      </header>
+
+      <main class="content">
+        <section class="page active" id="page-config" data-title="基础配置">
+          <div class="page-intro">
+            <div>
+              <div class="eyebrow"><i data-lucide="sliders-horizontal"></i> 基础配置</div>
+              <h1>LLM 配置、数据库连接配置与项目配置</h1>
+              <p class="intro-text">按当前功能边界拆成三块：模型连接归 LLM 配置，数据库目标归连接配置，行业背景和缩写最大字母数归项目配置。</p>
+            </div>
+          </div>
+
+          <div class="config-split">
+            <div class="panel">
+              <div class="panel-header">
+                <div class="card-title"><i data-lucide="bot"></i>LLM 配置</div>
+                <div class="header-actions">
+                  <button class="btn btn-warning"><i data-lucide="star"></i>设为默认</button>
+                  <button class="btn btn-primary"><i data-lucide="save"></i>保存配置</button>
+                  <button class="btn btn-danger"><i data-lucide="trash-2"></i>删除</button>
+                </div>
+              </div>
+              <div class="panel-body">
+                <div class="config-selector">
+                  <select style="width:240px"><option>DeepSeek 默认配置 ★</option><option>OpenAI 兼容配置</option></select>
+                </div>
+                <div class="form-grid">
+                  <div class="field"><label>API Key</label><input type="password" value="API Key 已设置" /></div>
+                  <div class="field"><label>Model</label><input value="deepseek-chat" /></div>
+                  <div class="field full"><label>API URL</label><input value="https://api.deepseek.com/v1/chat/completions" /></div>
+                  <div class="field full">
+                    <label>Temperature</label>
+                    <div class="slider-wrap"><input type="range" min="0" max="1" step="0.1" value="0.3" /><input value="0.3" /></div>
+                  </div>
+                  <div class="field full"><div class="hint-box">控制输出随机性：0=确定性输出，1=创意输出。推荐值：0.3（DDL生成）。</div></div>
+                  <div class="field full"><button class="btn btn-primary" style="width:max-content"><i data-lucide="plug"></i>测试连接</button></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-header">
+                <div class="card-title"><i data-lucide="folder-cog"></i>项目配置</div>
+                <div class="header-actions"><button class="btn btn-primary"><i data-lucide="save"></i>保存项目配置</button></div>
+              </div>
+              <div class="panel-body">
+                <div class="form-grid">
+                  <div class="field full"><label>行业背景</label><textarea rows="4">请输入当前项目所属行业背景，例如：保险、零售、电商、制造、医疗等，并补充核心业务术语或场景。</textarea></div>
+                  <div class="field full">
+                    <label>缩写最大字母数</label>
+                    <div class="slider-wrap"><input type="range" min="1" max="12" step="1" value="4" /><input value="4" /></div>
+                  </div>
+                  <div class="field full"><div class="hint-box">仅在“优先缩写”模式生效，默认 4。单表生成、批量生成、校验都会使用这个上限。</div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <div class="card-title"><i data-lucide="database"></i>数据库连接配置</div>
+              <div class="header-actions"><button class="btn btn-plain"><i data-lucide="refresh-cw"></i>刷新</button><button class="btn btn-primary"><i data-lucide="plus"></i>新增连接</button></div>
+            </div>
+            <div class="panel-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>连接名称</th><th>数据库类型</th><th>主机</th><th>端口</th><th>数据库/服务名</th><th>用户名</th><th>密码</th><th>操作</th></tr></thead>
+                  <tbody>
+                    <tr><td>开发 MySQL</td><td><span class="tag tag-blue">MySQL</span></td><td>127.0.0.1</td><td>3306</td><td>dw_dev</td><td>root</td><td><span class="tag tag-green">已配置</span></td><td><button class="btn btn-link">测试</button><button class="btn btn-link">编辑</button><button class="btn btn-link danger">删除</button></td></tr>
+                    <tr><td>测试 PostgreSQL</td><td><span class="tag tag-blue">PostgreSQL</span></td><td>10.1.2.15</td><td>5432</td><td>dw_test</td><td>dw_user</td><td><span class="tag tag-gray">未配置</span></td><td><button class="btn btn-link">测试</button><button class="btn btn-link">编辑</button><button class="btn btn-link danger">删除</button></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="page" id="page-standards" data-title="开发规范管理">
+          <div class="page-intro">
+            <div>
+              <div class="eyebrow"><i data-lucide="scroll-text"></i> 规范管理</div>
+              <h1>六段式生成规范与提示词管理</h1>
+              <p class="intro-text">对应后端最新 prompt segments：按生成链路拆成 6 个可维护片段，分别管理 system prompt、user prompt 和说明备注。</p>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <div class="card-title"><i data-lucide="blocks"></i>规范分段</div>
+              <div class="header-actions">
+                <button class="btn btn-plain"><i data-lucide="refresh-cw"></i>刷新</button>
+                <button class="btn btn-warning"><i data-lucide="rotate-ccw"></i>全部恢复默认</button>
+                <button class="btn btn-primary"><i data-lucide="save"></i>保存全部</button>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div class="segment-grid">
+                <div class="segment-card active">
+                  <div class="segment-card-title"><span class="tag tag-blue">1</span>文本需求结构化抽取</div>
+                  <div class="segment-card-stage">text-generate-ddl-task</div>
+                  <div class="segment-card-note">文本模式专用，只抽取中文结构化表定义，不生成英文名或 DDL。</div>
+                </div>
+                <div class="segment-card">
+                  <div class="segment-card-title"><span class="tag tag-blue">2</span>未匹配词根语义归一</div>
+                  <div class="segment-card-stage">field_processor.normalize_unmatched_roots_semantically</div>
+                  <div class="segment-card-note">识别同义、近义业务词根，优先沿用当前标准词根映射。</div>
+                </div>
+                <div class="segment-card">
+                  <div class="segment-card-title"><span class="tag tag-blue">3</span>未匹配词根批量翻译</div>
+                  <div class="segment-card-stage">field_processor._translate_roots_batch</div>
+                  <div class="segment-card-note">翻译剩余未匹配词根，字段名仍由本地按 jieba 分词顺序拼接。</div>
+                </div>
+                <div class="segment-card">
+                  <div class="segment-card-title"><span class="tag tag-blue">4</span>表名生成</div>
+                  <div class="segment-card-stage">field_processor.generate_table_name</div>
+                  <div class="segment-card-note">根据中文表名、主题域、开发规范和可用词根生成英文表名。</div>
+                </div>
+                <div class="segment-card">
+                  <div class="segment-card-title"><span class="tag tag-blue">5</span>同表重复字段名修正</div>
+                  <div class="segment-card-stage">field_processor._request_duplicate_field_name_fix</div>
+                  <div class="segment-card-note">仅在同一张表内检测到重复英文字段名时触发，避免用无意义序号凑唯一。</div>
+                </div>
+                <div class="segment-card">
+                  <div class="segment-card-title"><span class="tag tag-blue">6</span>统一校验字段修正</div>
+                  <div class="segment-card-stage">unified_validator.generate_field_fix_prompt</div>
+                  <div class="segment-card-note">统一校验发现错误字段后触发，按字段序号定位并修正字段名。</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" style="margin-top:16px; margin-bottom:16px;">
+            <div class="panel-header">
+              <div class="card-title"><i data-lucide="sliders-horizontal"></i>Prompt 公共操作</div>
+              <div class="header-actions"><button class="btn btn-warning"><i data-lucide="rotate-ccw"></i>恢复本段默认</button><button class="btn btn-primary"><i data-lucide="save"></i>保存本段</button></div>
+            </div>
+          </div>
+
+          <div class="layout-2" style="margin-top:16px;">
+            <div class="panel">
+              <div class="panel-header">
+                <div class="card-title"><i data-lucide="terminal-square"></i>System Prompt</div>
+              </div>
+              <div class="panel-body">
+                <textarea rows="10">你是结构化信息抽取助手，只返回合法 JSON 对象。</textarea>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-header">
+                <div class="card-title"><i data-lucide="message-square-text"></i>User Prompt</div>
+              </div>
+              <div class="panel-body">
+                <textarea rows="10">请从下面的中文建表需求中提取单张表的结构化定义，并严格只输出 JSON 对象，不要输出解释。
+
+要求：
+1. 只能提取 1 张表；
+2. JSON 必须包含 table_name、layer、user_specified_subject_domain、fields；
+3. 如果字段类型无法明确判断，type 返回空字符串。</textarea>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header"><div class="card-title"><i data-lucide="info"></i>片段说明</div></div>
+            <div class="panel-body">
+              <div class="hint-box">当前选中：1. 文本需求结构化抽取。这个阶段只负责把自然语言建表需求转成中文结构化表定义，不负责英文命名、不负责生成 DDL。</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="page" id="page-batch" data-title="建表生成">
+          <div class="page-intro">
+            <div>
+              <div class="eyebrow"><i data-lucide="zap"></i> 建表生成</div>
+              <h1>文本输入 / Excel 上传生成 DDL</h1>
+              <p class="intro-text">对应当前“建表生成”页：输入方式切换、建表需求、Excel 模板、解析预览、生成参数、任务进度、新词根和生成结果。</p>
+            </div>
+          </div>
+
+          <div class="layout-2">
+            <div class="panel">
+              <div class="panel-header"><div class="card-title"><i data-lucide="zap"></i>建表生成</div></div>
+              <div class="panel-body">
+                <div class="config-item" style="margin-bottom:14px;">
+                  <span class="config-label">输入方式：</span>
+                  <div class="segment" id="batchInputMode"><button class="active" data-mode="text">文本输入</button><button data-mode="excel">Excel上传</button></div>
+                </div>
+                <div class="panel" id="batchTextPanel" style="box-shadow:none;">
+                  <div class="panel-header"><div class="card-title"><i data-lucide="file-text"></i>建表需求</div></div>
+                  <div class="panel-body"><textarea rows="8">请输入自然语言描述，例如：
+创建一个订单表，包含订单号、用户ID、金额、下单时间等字段</textarea></div>
+                </div>
+                <div class="upload-section" id="batchExcelPanel" style="margin-top:14px; display:none;">
+                  <button class="btn btn-plain"><i data-lucide="folder-open"></i>选择Excel文件</button>
+                  <button class="btn btn-success"><i data-lucide="download"></i>下载模板</button>
+                  <span class="config-hint">订单域建表模板.xlsx 已选择，可点击“开始生成”按钮</span>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div class="panel">
+                <div class="panel-header"><div class="card-title"><i data-lucide="table-properties"></i>解析预览</div></div>
+                <div class="panel-body">
+                  <div class="table-wrap">
+                    <table>
+                      <thead><tr><th>序号</th><th>分层</th><th>主题域</th><th>表名</th><th>字段数量</th></tr></thead>
+                      <tbody>
+                        <tr><td>1</td><td>DWD</td><td>订单域</td><td>dwd_order_detail</td><td>18</td></tr>
+                        <tr><td>2</td><td>DIM</td><td>用户域</td><td>dim_user</td><td>12</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+              <div class="panel">
+                <div class="panel-header"><div class="card-title"><i data-lucide="sprout"></i>发现新词根</div><div class="header-actions"><span class="tag tag-orange">3 个</span><button class="btn btn-success"><i data-lucide="save"></i>保存到历史词根</button></div></div>
+                <div class="panel-body">
+                  <div class="table-wrap">
+                    <table>
+                      <thead><tr><th>中文名</th><th>词根全称</th><th>缩写</th><th>推荐类型</th><th>业务域</th></tr></thead>
+                      <tbody>
+                        <tr><td>支付状态</td><td>payment_status</td><td>pay_stat</td><td>VARCHAR(20)</td><td>订单域</td></tr>
+                        <tr><td>下单渠道</td><td>order_channel</td><td>ord_chnl</td><td>VARCHAR(32)</td><td>订单域</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" style="margin-top:16px;">
+            <div class="panel-body">
+              <div class="config-row">
+                <div class="config-item"><span class="config-label">数据库类型：</span><select><option>MySQL</option><option>PostgreSQL</option><option>Oracle</option></select></div>
+                <div class="config-item"><span class="config-label">词根匹配：</span><select><option>优先缩写</option><option>优先全称</option></select></div>
+                <div class="config-item"><span class="config-label">分词模式：</span><select><option>精准模式</option><option>全模式</option><option>搜索引擎模式</option></select></div>
+                <div class="config-item"><span class="config-label">最终校验：</span><span class="tag tag-green">开启</span><span class="config-hint">关闭可提高生成速度</span></div>
+                <div class="config-item"><span class="config-label">并发线程：</span><select><option>5 个</option><option>10 个</option></select></div>
+              </div>
+              <div class="action-row">
+                <button class="btn btn-success"><i data-lucide="sparkles"></i>开始解析并生成</button>
+                <button class="btn btn-danger"><i data-lucide="octagon-x"></i>终止任务</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" style="margin-top:16px;">
+            <div class="panel-header"><div class="card-title"><i data-lucide="activity"></i>建表进度</div></div>
+            <div class="panel-body">
+              <div class="progress-card" style="margin-top:0;">
+                <div class="progress-header"><span class="progress-title">建表进度</span><span class="progress-text">组装DDL中 · 87%</span></div>
+                <div class="progress-bar"><div class="progress-fill" style="width:87%"></div></div>
+                <div class="milestone-track">
+                  <div class="milestone-item done"><div class="milestone-step">1</div><div class="milestone-title">解析Excel</div></div>
+                  <div class="milestone-item done"><div class="milestone-step">2</div><div class="milestone-title">字段分组</div></div>
+                  <div class="milestone-item done"><div class="milestone-step">3</div><div class="milestone-title">jieba分词</div></div>
+                  <div class="milestone-item done"><div class="milestone-step">4</div><div class="milestone-title">历史词根匹配</div></div>
+                  <div class="milestone-item done"><div class="milestone-step">5</div><div class="milestone-title">生成字段名</div></div>
+                  <div class="milestone-item active"><div class="milestone-step">6</div><div class="milestone-title">组装DDL</div></div>
+                  <div class="milestone-item"><div class="milestone-step">7</div><div class="milestone-title">最终校验</div></div>
+                </div>
+                <div class="stat-grid">
+                  <div class="stat-item"><div class="stat-value">42</div><div class="stat-label">历史词根匹配</div></div>
+                  <div class="stat-item"><div class="stat-value">3</div><div class="stat-label">需要 LLM 生成</div></div>
+                  <div class="stat-item"><div class="stat-value">45</div><div class="stat-label">去重词根数</div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" style="margin-top:16px;">
+            <div class="panel-header"><div class="card-title"><i data-lucide="file-code-2"></i>生成结果</div><div class="header-actions"><button class="btn btn-plain">复制全部SQL</button><button class="btn btn-success">下载SQL文件</button></div></div>
+            <div class="panel-body">
+              <div style="margin-bottom:10px;"><span class="tag tag-green">成功: 2</span> <span class="tag tag-gray">耗时: 00:32</span> <span class="tag tag-green">已自动修正</span></div>
+              <pre class="sql-output">CREATE TABLE dwd_order_detail (
+  order_id VARCHAR(64) COMMENT '订单号',
+  user_id VARCHAR(64) COMMENT '用户ID',
+  order_amt DECIMAL(18,2) COMMENT '订单金额',
+  create_time DATETIME COMMENT '下单时间'
+) COMMENT='订单明细表';</pre>
+            </div>
+          </div>
+        </section>
+
+        <section class="page" id="page-history" data-title="建表历史">
+          <div class="page-intro">
+            <div>
+              <div class="eyebrow"><i data-lucide="history"></i> 建表历史</div>
+              <h1>DDL 历史、下载、查看与一键建表</h1>
+              <p class="intro-text">保持当前历史页边界：生成记录可查看和下载，只有历史记录中的 DDL 才提供绑定数据库连接后执行建表。</p>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header"><div class="card-title"><i data-lucide="scroll-text"></i>建表历史记录</div><div class="header-actions"><button class="btn btn-plain"><i data-lucide="refresh-cw"></i>刷新</button><button class="btn btn-danger"><i data-lucide="trash-2"></i>清空全部</button></div></div>
+            <div class="panel-body">
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>ID</th><th>类型</th><th>描述</th><th>表数量</th><th>成功数</th><th>数据库类型</th><th>词根匹配</th><th>时间</th><th>建表记录</th><th>操作</th><th>一键建表</th></tr></thead>
+                  <tbody>
+                    <tr><td>1024</td><td><span class="tag tag-green">批量</span></td><td>订单域模型</td><td>8</td><td>8</td><td>MySQL</td><td><span class="tag tag-orange">优先缩写</span></td><td>2026-06-28 10:12</td><td><span class="tag tag-gray">未执行</span></td><td><button class="btn btn-link">查看</button><button class="btn btn-link">下载</button><button class="btn btn-link danger">删除</button></td><td><button class="btn btn-primary">建表</button></td></tr>
+                    <tr><td>1023</td><td><span class="tag tag-blue">单一</span></td><td>用户维表</td><td>1</td><td>1</td><td>PostgreSQL</td><td><span class="tag tag-orange">优先全称</span></td><td>2026-06-27 16:48</td><td><span class="tag tag-green">已建表</span></td><td><button class="btn btn-link">查看</button><button class="btn btn-link">下载</button><button class="btn btn-link danger">删除</button></td><td><button class="btn btn-primary">建表</button></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="dialog-demo">
+                <div class="dialog-head"><span>查看 DDL 弹窗 / 执行建表弹窗示意</span><div class="header-actions"><button class="btn btn-success">复制全部</button><button class="btn btn-primary">建表</button></div></div>
+                <div class="panel-body">
+                  <div class="form-grid">
+                    <div class="field"><label>脚本类型</label><input value="MySQL" /></div>
+                    <div class="field"><label>建表语句数</label><input value="8" /></div>
+                    <div class="field full"><label>目标连接</label><select><option>开发 MySQL (MySQL)</option></select></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="page" id="page-governance" data-title="词根治理">
+          <div class="page-intro">
+            <div>
+              <div class="eyebrow"><i data-lucide="bar-chart-3"></i> 词根治理</div>
+              <h1>标准词根治理、历史词根与标准词根管理</h1>
+              <p class="intro-text">贴合当前页面：发起治理、应用结果，并维护历史词根和当前标准词根。</p>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header"><div class="card-title"><i data-lucide="shield-check"></i>标准词根治理</div><div class="header-actions"><button class="btn btn-primary">发起治理</button><button class="btn btn-success">应用结果</button><button class="btn btn-plain">刷新</button></div></div>
+            <div class="panel-body">
+              <div class="progress-card" style="margin-top:0;">
+                <div class="progress-header"><span class="progress-title">治理进度</span><span class="tag tag-orange">模型请求中</span></div>
+                <div class="config-row">
+                  <span>原始词根：320</span><span>整理后：286</span><span>剔除标准：210</span><span>待治理：76</span><span>候选结果：18</span><span>已耗时：00:41</span>
+                </div>
+                <div class="milestone-track">
+                  <div class="milestone-item done"><div class="milestone-step">1</div><div class="milestone-title">加载历史词根</div></div>
+                  <div class="milestone-item done"><div class="milestone-step">2</div><div class="milestone-title">清洗去重</div></div>
+                  <div class="milestone-item done"><div class="milestone-step">3</div><div class="milestone-title">构建治理提示词</div></div>
+                  <div class="milestone-item active"><div class="milestone-step">4</div><div class="milestone-title">发送模型请求</div></div>
+                  <div class="milestone-item"><div class="milestone-step">5</div><div class="milestone-title">等待模型响应</div></div>
+                  <div class="milestone-item"><div class="milestone-step">6</div><div class="milestone-title">解析返回结果</div></div>
+                  <div class="milestone-item"><div class="milestone-step">7</div><div class="milestone-title">生成候选词根</div></div>
+                </div>
+              </div>
+
+              <div style="margin:14px 0;"><span class="tag tag-green">标准词根: 2384 条</span> <span class="tag tag-blue">治理来源: 320 条</span></div>
+              <div class="governance-panels">
+                <div>
+                  <div class="toolbar"><div class="card-title">历史词根</div><div class="header-actions"><button class="btn btn-plain">保存</button><button class="btn btn-plain">刷新</button><button class="btn btn-warning">手动添加</button><button class="btn btn-danger">清除全部</button></div></div>
+                  <div class="table-wrap">
+                    <table>
+                      <thead><tr><th>业务域</th><th>域编码</th><th>中文名称</th><th>全称词根</th><th>缩写词根</th><th>推荐类型</th><th>操作</th></tr></thead>
+                      <tbody><tr><td>订单域</td><td>ord</td><td>订单金额</td><td>order_amount</td><td>ord_amt</td><td>DECIMAL</td><td><button class="btn btn-link">编辑</button><button class="btn btn-link danger">删除</button></td></tr></tbody>
+                    </table>
+                  </div>
+                </div>
+                <div>
+                  <div class="toolbar"><div class="card-title">治理结果</div></div>
+                  <div class="table-wrap">
+                    <table>
+                      <thead><tr><th>业务域</th><th>域编码</th><th>中文名称</th><th>全称词根</th><th>缩写词根</th><th>推荐类型</th><th>治理状态</th></tr></thead>
+                      <tbody><tr><td>订单域</td><td>ord</td><td>支付状态</td><td>payment_status</td><td>pay_stat</td><td>VARCHAR</td><td><span class="tag tag-orange">待应用</span></td></tr></tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              <div style="margin-top:16px;" class="toolbar">
+                <div class="card-title">当前标准词根</div>
+                <div class="header-actions"><div class="search-input"><i data-lucide="search"></i><input placeholder="搜索标准词根（中文或英文）" /></div><button class="btn btn-plain">刷新</button><button class="btn btn-warning">手动添加</button><button class="btn btn-plain">Excel导入</button><button class="btn btn-success">导出Excel</button></div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>业务域</th><th>域编码</th><th>中文名称</th><th>全称词根</th><th>缩写词根</th><th>推荐类型</th><th>最近修改</th><th>操作</th></tr></thead>
+                  <tbody>
+                    <tr><td>订单域</td><td>ord</td><td>订单</td><td>order</td><td>ord</td><td>VARCHAR(64)</td><td>2026-06-28 09:20</td><td><button class="btn btn-link">编辑</button><button class="btn btn-link danger">删除</button><button class="btn btn-link">记录</button></td></tr>
+                    <tr><td>用户域</td><td>usr</td><td>用户</td><td>user</td><td>usr</td><td>VARCHAR(64)</td><td>2026-06-27 18:10</td><td><button class="btn btn-link">编辑</button><button class="btn btn-link danger">删除</button><button class="btn btn-link">记录</button></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">© 2025 数仓建表助手 - AI 驱动的智能 DDL 生成工具</footer>
+    </div>
+  </div>
+
+  <script>
+    const title = document.getElementById("headerTitle");
+    const navItems = document.querySelectorAll(".nav-item");
+    const pages = document.querySelectorAll(".page");
+
+    function activatePage(name) {
+      navItems.forEach(item => item.classList.toggle("active", item.dataset.page === name));
+      pages.forEach(page => {
+        const active = page.id === "page-" + name;
+        page.classList.toggle("active", active);
+        if (active) title.textContent = page.dataset.title || name;
+      });
+    }
+
+    navItems.forEach(item => item.addEventListener("click", () => activatePage(item.dataset.page)));
+    document.querySelectorAll(".segment").forEach(group => {
+      group.addEventListener("click", event => {
+        const button = event.target.closest("button");
+        if (!button) return;
+        group.querySelectorAll("button").forEach(item => item.classList.remove("active"));
+        button.classList.add("active");
+      });
+    });
+
+    document.querySelectorAll(".segment-card").forEach(card => {
+      card.addEventListener("click", () => {
+        document.querySelectorAll(".segment-card").forEach(item => item.classList.remove("active"));
+        card.classList.add("active");
+      });
+    });
+
+    const batchInputMode = document.getElementById("batchInputMode");
+    const batchTextPanel = document.getElementById("batchTextPanel");
+    const batchExcelPanel = document.getElementById("batchExcelPanel");
+
+    function syncBatchInputMode(mode) {
+      if (!batchTextPanel || !batchExcelPanel) return;
+      const isExcel = mode === "excel";
+      batchTextPanel.style.display = isExcel ? "none" : "block";
+      batchExcelPanel.style.display = isExcel ? "flex" : "none";
+    }
+
+    if (batchInputMode) {
+      syncBatchInputMode(batchInputMode.querySelector("button.active")?.dataset.mode || "text");
+      batchInputMode.addEventListener("click", event => {
+        const button = event.target.closest("button");
+        if (!button) return;
+        syncBatchInputMode(button.dataset.mode || "text");
+      });
+    }
+
+    if (window.lucide) window.lucide.createIcons();
+  </script>
+</body>
+</html>

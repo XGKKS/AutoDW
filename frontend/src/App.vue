@@ -2,8 +2,11 @@
   <div class="app-wrapper">
     <aside class="sidebar">
       <div class="logo">
-        <div class="logo-icon">🗄️</div>
-        <div class="logo-text">数仓建表助手</div>
+        <div class="logo-icon"><DataAnalysis /></div>
+        <div>
+          <div class="logo-text">数仓建表助手</div>
+          <div class="logo-sub">AutoDW-为规范而生</div>
+        </div>
       </div>
       <nav class="nav-menu">
         <div
@@ -11,7 +14,7 @@
           :class="{ active: activeMenu === 'config' }"
           @click="activeMenu = 'config'"
         >
-          <span class="nav-icon">📋</span>
+          <span class="nav-icon"><Tickets /></span>
           <span class="nav-text">基础配置</span>
         </div>
         <div
@@ -19,7 +22,7 @@
           :class="{ active: activeMenu === 'standards' }"
           @click="activeMenu = 'standards'"
         >
-          <span class="nav-icon">📜</span>
+          <span class="nav-icon"><Document /></span>
           <span class="nav-text">规范管理</span>
         </div>
         <div
@@ -27,7 +30,7 @@
           :class="{ active: activeMenu === 'batch' }"
           @click="activeMenu = 'batch'"
         >
-          <span class="nav-icon">⚡</span>
+          <span class="nav-icon"><Lightning /></span>
           <span class="nav-text">建表生成</span>
         </div>
         <div
@@ -35,7 +38,7 @@
           :class="{ active: activeMenu === 'history' }"
           @click="activeMenu = 'history'"
         >
-          <span class="nav-icon">📜</span>
+          <span class="nav-icon"><Clock /></span>
           <span class="nav-text">建表历史</span>
         </div>
         <div
@@ -43,7 +46,7 @@
           :class="{ active: activeMenu === 'governance' }"
           @click="activeMenu = 'governance'"
         >
-          <span class="nav-icon">&#x1F4CA;</span>
+          <span class="nav-icon"><TrendCharts /></span>
           <span class="nav-text">词根治理</span>
         </div>
       </nav>
@@ -63,7 +66,80 @@
 
       <main class="content">
         <div v-show="activeMenu === 'config'" class="config-view">
-          <el-card class="config-card" shadow="hover">
+          <div class="config-split redesigned-config">
+            <section class="panel">
+              <div class="panel-header">
+                <div class="card-title"><Service />LLM 配置</div>
+                <div class="header-actions">
+                  <el-button type="warning" @click="setAsDefault" :disabled="!selectedConfig"><Star />设为默认</el-button>
+                  <el-button type="primary" @click="saveCurrentLlmConfig"><FolderChecked />保存配置</el-button>
+                  <el-button @click="showSaveAsDialog"><Plus />另存为</el-button>
+                  <el-button type="danger" @click="deleteConfig" :disabled="!selectedConfig"><Delete />删除</el-button>
+                </div>
+              </div>
+              <div class="panel-body">
+                <div class="config-selector">
+                  <el-select v-model="selectedConfig" placeholder="选择配置" style="width: 240px">
+                    <el-option v-for="config in savedConfigs" :key="config.name" :label="config.name + (config.isDefault ? ' ★' : '')" :value="config.name" />
+                  </el-select>
+                </div>
+                <div class="form-grid">
+                  <div class="field">
+                    <label>API Key</label>
+                    <div v-if="!apiKeySaved" class="api-key-input"><el-input v-model="llmConfig.apiKey" type="password" placeholder="请输入 API Key" /></div>
+                    <div v-else class="api-key-saved api-key-display" @click="resetApiKey"><span class="key-placeholder">API Key 已设置</span></div>
+                  </div>
+                  <div class="field"><label>Model</label><el-input v-model="llmConfig.model" placeholder="请输入模型名称" /></div>
+                  <div class="field full"><label>API URL</label><el-input v-model="llmConfig.apiUrl" placeholder="请输入 API URL" /></div>
+                  <div class="field full">
+                    <label>Temperature</label>
+                    <div class="slider-wrap"><el-slider v-model="llmConfig.temperature" :min="0" :max="1" :step="0.1" /><el-input-number v-model="llmConfig.temperature" :min="0" :max="1" :step="0.1" :precision="1" controls-position="right" /></div>
+                  </div>
+                  <div class="field full"><div class="hint-box">控制输出随机性：0=确定性输出，1=创意输出。推荐值：0.3（DDL生成）。</div></div>
+                  <div class="field full"><el-button type="primary" @click="testConnection" :loading="testing"><Connection />测试连接</el-button></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div class="card-title"><FolderOpened />项目配置</div>
+                <div class="header-actions"><el-button type="primary" @click="saveProjectConfig"><FolderChecked />保存项目配置</el-button></div>
+              </div>
+              <div class="panel-body">
+                <div class="form-grid">
+                  <div class="field full"><label>行业背景</label><el-input v-model="llmConfig.industryContext" type="textarea" :rows="4" placeholder="请输入当前项目所属行业背景，例如：保险、零售、电商、制造、医疗等，并补充核心业务术语或场景。" /></div>
+                  <div class="field full">
+                    <label>缩写最大字母数</label>
+                    <div class="slider-wrap"><el-slider v-model="llmConfig.abbrMaxLen" :min="1" :max="12" :step="1" /><el-input-number v-model="llmConfig.abbrMaxLen" :min="1" :max="12" :step="1" controls-position="right" /></div>
+                  </div>
+                  <div class="field full"><div class="hint-box">仅在“优先缩写”模式生效，默认 4。单表生成、批量生成、校验都会使用这个上限。</div></div>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <section class="panel db-config-panel">
+            <div class="panel-header">
+              <div class="card-title"><Coin />数据库连接配置</div>
+              <div class="header-actions"><el-button type="info" plain @click="loadDbConnections"><Refresh />刷新</el-button><el-button type="primary" @click="showDbConnectionDialog()"><Plus />新增连接</el-button></div>
+            </div>
+            <div class="panel-body">
+              <div class="table-wrap">
+                <el-table :data="dbConnections" size="small">
+                  <el-table-column prop="name" label="连接名称" min-width="140" />
+                  <el-table-column prop="db_type" label="数据库类型" width="140"><template #default="scope"><el-tag>{{ formatDbType(scope.row.db_type) }}</el-tag></template></el-table-column>
+                  <el-table-column prop="host" label="主机" min-width="150" show-overflow-tooltip />
+                  <el-table-column prop="port" label="端口" width="90" />
+                  <el-table-column prop="database" label="数据库/服务名" min-width="160" show-overflow-tooltip />
+                  <el-table-column prop="username" label="用户名" width="120" />
+                  <el-table-column label="密码" width="90"><template #default="scope"><el-tag :type="scope.row.has_password ? 'success' : 'info'" size="small">{{ scope.row.has_password ? '已配置' : '未配置' }}</el-tag></template></el-table-column>
+                  <el-table-column label="操作" width="240"><template #default="scope"><el-button link @click="testDbConnection(scope.row)" :loading="testingDbConnectionId === scope.row.id">测试</el-button><el-button link type="primary" @click="showDbConnectionDialog(scope.row)">编辑</el-button><el-button link type="danger" @click="deleteDbConnection(scope.row)">删除</el-button></template></el-table-column>
+                </el-table>
+              </div>
+            </div>
+          </section>
+          <el-card class="config-card legacy-config-card" shadow="hover">
             <template #header>
               <div class="card-header">
                 <span class="card-title">🤖 LLM 配置</span>
@@ -79,7 +155,8 @@
                 />
               </el-select>
               <el-button type="warning" plain @click="setAsDefault" :disabled="!selectedConfig">设为默认</el-button>
-              <el-button type="primary" @click="showSaveDialog">保存配置</el-button>
+              <el-button type="primary" @click="saveCurrentLlmConfig">保存配置</el-button>
+              <el-button @click="showSaveAsDialog">另存为</el-button>
               <el-button type="danger" plain @click="deleteConfig" :disabled="!selectedConfig">删除</el-button>
             </div>
             <div class="llm-form-container">
@@ -182,7 +259,7 @@
               </div>
             </el-card>
 
-          <el-card class="config-card db-config-card" shadow="hover">
+          <el-card class="config-card db-config-card legacy-config-card" shadow="hover">
             <template #header>
               <div class="card-header">
                 <span class="card-title">数据库连接配置</span>
@@ -221,124 +298,126 @@
             <el-empty v-if="dbConnections.length === 0" description="暂无数据库连接配置" />
           </el-card>
 
-          <div class="side-by-side-container">
-            <el-card class="prompt-card" shadow="hover">
-              <template #header>
-                <div class="card-header">
-                  <span class="card-title">💡 自定义提示词</span>
-                  <div class="header-actions">
-                    <el-button type="primary" plain size="small" @click="saveCustomPrompt">保存</el-button>
-                    <el-button type="info" plain size="small" @click="resetPrompt">恢复默认</el-button>
-                  </div>
-                </div>
-              </template>
-              <el-input
-                v-model="customPrompt"
-                type="textarea"
-                :rows="15"
-                placeholder="提示词支持变量：
-{history_roots} - 历史词根
-{word_roots_content} - 词根内容
-{standards_content} - 规范内容
-{industry_context} - 行业背景
-{description} - 建表需求
-{db_type} - 数据库类型
-                {root_match_priority} - 词根匹配优先级"
-              />
-            </el-card>
-          </div>
+
         </div>
 
-        <div v-show="activeMenu === 'standards'" class="standards-view">
-          <div class="standards-layout">
-            <el-card class="standards-list-card" shadow="hover">
-              <template #header>
-                <div class="card-header">
-                  <span class="card-title">📚 规范列表</span>
+        <div v-if="activeMenu === 'standards'" class="standards-view workbench-page">
+          <section class="panel prompt-workbench-panel">
+            <div class="panel-header">
+              <div class="card-title"><Operation />规范分段</div>
+              <div class="header-actions">
+                <el-button type="info" plain @click="loadPromptSegments" :loading="promptSegmentsLoading"><Refresh />刷新</el-button>
+                <el-button type="warning" plain @click="resetPromptSegments" :loading="promptSegmentsLoading">全部恢复默认</el-button>
+                <el-button type="primary" @click="savePromptSegments" :loading="promptSegmentsSaving"><FolderChecked />保存全部</el-button>
+              </div>
+            </div>
+            <div class="panel-body">
+              <el-alert
+                v-if="promptSegmentsMigrationNotice"
+                class="prompt-segments-alert"
+                :title="promptSegmentsMigrationNotice"
+                type="warning"
+                :closable="false"
+                show-icon
+              />
+              <div class="segment-grid">
+                <button
+                  v-for="(segment, index) in promptSegments"
+                  :key="segment.key"
+                  type="button"
+                  class="segment-card"
+                  :class="{ active: selectedPromptSegment?.key === segment.key }"
+                  @click="selectPromptSegment(segment)"
+                >
+                  <div class="segment-card-title">
+                    <span class="tag tag-blue">{{ index + 1 }}</span>
+                    <span>{{ formatPromptSegmentTitle(segment.title) }}</span>
+                  </div>
+                  <div class="segment-card-stage">{{ segment.stage }}</div>
+                  <div class="segment-card-note">{{ segment.business_description || segment.notes || '点击查看本阶段可干预说明。' }}</div>
+                </button>
+              </div>
+
+              <div class="prompt-common-panel panel sub-panel">
+                <div class="panel-header">
+                  <div class="card-title"><Operation />阶段公共操作</div>
                   <div class="header-actions">
-                    <el-button type="primary" plain size="small" @click="createNewStandard">
-                      <span>➕</span> 新建规范
-                    </el-button>
-                    <el-button type="info" plain size="small" @click="loadStandards">刷新</el-button>
+                    <el-button type="warning" plain :disabled="!selectedPromptSegment" @click="resetPromptSegment(selectedPromptSegment)" :loading="selectedPromptSegment ? promptSegmentResettingMap[selectedPromptSegment.key] : false">恢复本段默认</el-button>
+                    <el-button type="primary" :disabled="!selectedPromptSegment" @click="savePromptSegment(selectedPromptSegment)" :loading="selectedPromptSegment ? promptSegmentSavingMap[selectedPromptSegment.key] : false">保存本段</el-button>
                   </div>
                 </div>
-              </template>
-              <div class="standards-list">
-                <el-table :data="standardsList" size="small" @row-click="selectStandard">
-                  <el-table-column type="index" label="序号" width="60" />
-                  <el-table-column prop="name" label="规范名称" min-width="300" show-overflow-tooltip />
-                  <el-table-column prop="is_active" label="状态" width="80">
-                    <template #default="scope">
-                      <el-tag :type="scope.row.is_active ? 'success' : 'info'">
-                        {{ scope.row.is_active ? '✓ 启用' : '未启用' }}
-                      </el-tag>
-                    </template>
-                  </el-table-column>
-                  <el-table-column prop="updated_at" label="更新时间" width="180" />
-                  <el-table-column label="操作" width="240">
-                    <template #default="scope">
-                      <el-button 
-                        :type="scope.row.is_active ? 'warning' : 'success'" 
-                        link 
-                        size="small" 
-                        @click="toggleStandardActive(scope.row)"
-                      >
-                        {{ scope.row.is_active ? '禁用' : '启用' }}
-                      </el-button>
-                      <el-button type="primary" link size="small" @click="editStandard(scope.row)">编辑</el-button>
-                      <el-button 
-                        type="danger" 
-                        link 
-                        size="small" 
-                        @click="deleteStandard(scope.row.id)"
-                        :disabled="scope.row.id === 'default'"
-                        :class="{ 'disabled-btn': scope.row.id === 'default' }"
-                      >
-                        {{ scope.row.id === 'default' ? '不可删除' : '删除' }}
-                      </el-button>
-                    </template>
-                  </el-table-column>
-                </el-table>
               </div>
-            </el-card>
-            
-            <div class="standards-content">
-              <el-card class="standards-editor-card" shadow="hover">
-                <template #header>
-                  <div class="card-header">
-                    <span class="card-title">✏️ 规范编辑</span>
-                    <div class="header-actions">
-                      <el-button type="primary" plain size="small" @click="saveStandards" :disabled="!standardsContent">保存修改</el-button>
-                      <el-button type="info" plain size="small" @click="loadStandards">刷新</el-button>
+
+              <div v-if="selectedPromptSegment" class="layout-2 prompt-editor-layout">
+                <div class="panel sub-panel">
+                  <div class="panel-header">
+                    <div class="card-title"><InfoFilled />阶段说明</div>
+                  </div>
+                  <div class="panel-body">
+                    <div class="prompt-guidance-stack">
+                      <div class="hint-box">
+                        <strong>当前阶段做什么：</strong>{{ selectedPromptSegment.business_description || '该阶段用于补充模型决策要求。' }}
+                      </div>
+                      <div class="hint-box">
+                        <strong>系统自动注入：</strong>
+                        <span v-if="selectedPromptSegment.auto_context_labels?.length">
+                          {{ selectedPromptSegment.auto_context_labels.join('、') }}
+                        </span>
+                        <span v-else>无额外上下文</span>
+                      </div>
+                      <div class="hint-box" v-if="selectedPromptSegment.notes">
+                        <strong>补充说明：</strong>{{ selectedPromptSegment.notes }}
+                      </div>
                     </div>
                   </div>
-                </template>
-                <div class="standards-edit-container">
-                  <el-input
-                    v-model="standardsContent"
-                    type="textarea"
-                    :rows="20"
-                    placeholder="在此编辑开发规范文档..."
-                    class="standards-textarea"
-                  />
                 </div>
-              </el-card>
-              
-              <el-card class="standards-preview-card" shadow="hover">
-                <template #header>
-                  <div class="card-header">
-                    <span class="card-title">👁️ 实时预览</span>
+
+                <div class="panel sub-panel">
+                  <div class="panel-header">
+                    <div class="card-title"><ChatLineSquare />本阶段补充要求</div>
                   </div>
-                </template>
-                <div class="standards-preview-container">
-                  <div v-if="!standardsContent" class="empty-preview">
-                    <el-empty description="暂无规范内容，请先编辑或上传" />
+                  <div class="panel-body">
+                    <el-input
+                      v-model="selectedPromptSegment.guidance"
+                      type="textarea"
+                      :rows="10"
+                      :placeholder="selectedPromptSegment.guidance_placeholder || '请输入希望模型在本阶段额外遵守的业务要求。'"
+                    />
+                    <div class="hint-box prompt-guidance-tip">
+                      这里适合补充业务优先级、同义词判断、命名偏好或避免误判的规则。系统运行参数、输出格式和占位符会自动注入，无法被误删。
+                    </div>
                   </div>
-                  <div v-else class="preview-content" v-html="renderMarkdown(standardsContent)"></div>
                 </div>
-              </el-card>
+              </div>
+
+              <div class="panel sub-panel">
+                <div class="panel-header">
+                  <div class="card-title"><Monitor />发送预览</div>
+                </div>
+                <div class="panel-body">
+                  <div class="hint-box" v-if="selectedPromptSegment">
+                    当前选中：{{ formatPromptSegmentTitle(selectedPromptSegment.title) }}。下面是系统自动组装后的只读预览，便于确认补充要求会插入到什么位置。
+                  </div>
+                  <details v-if="selectedPromptSegment" class="prompt-preview-details">
+                    <summary>查看系统 Prompt 与用户 Prompt 预览</summary>
+                    <div class="prompt-preview-grid">
+                      <div class="prompt-preview-card">
+                        <div class="prompt-preview-title">System Prompt 预览</div>
+                        <pre class="prompt-preview-text">{{ selectedPromptSegment.preview_system_prompt }}</pre>
+                      </div>
+                      <div class="prompt-preview-card">
+                        <div class="prompt-preview-title">User Prompt 预览</div>
+                        <pre class="prompt-preview-text">{{ selectedPromptSegment.preview_user_prompt }}</pre>
+                      </div>
+                    </div>
+                  </details>
+                  <div class="empty-state" v-else>
+                    <el-empty description="暂无 Prompt 分段数据，请刷新后再编辑" />
+                  </div>
+                </div>
+              </div>
             </div>
-          </div>
+          </section>
         </div>
 
         <div v-show="activeMenu === 'ddl'" class="ddl-view">
@@ -444,298 +523,254 @@
           </el-card>
         </div>
 
-        <div v-show="activeMenu === 'batch'" class="batch-view">
-          <div class="batch-top-section">
-            <el-card class="config-card" shadow="hover">
-            <template #header>
-              <div class="card-header">
-                <span class="card-title">⚡ 建表生成</span>
+        <div v-if="activeMenu === 'batch'" class="batch-view workbench-page">
+          <div class="layout-2 generation-layout">
+            <section class="panel generation-input-panel">
+              <div class="panel-header">
+                <div class="card-title"><Lightning />建表生成</div>
               </div>
-            </template>
-
-            <div class="generation-mode-switch">
-              <span class="config-label">输入方式：</span>
-              <el-radio-group v-model="generationMode" :disabled="batchGenerating">
-                <el-radio-button label="text">文本输入</el-radio-button>
-                <el-radio-button label="excel">Excel上传</el-radio-button>
-              </el-radio-group>
-            </div>
-
-            <el-card v-if="generationMode === 'text'" class="text-input-card" shadow="never">
-              <template #header>
-                <div class="card-header">
-                  <span class="card-title">📝 建表需求</span>
-                </div>
-              </template>
-              <el-input
-                v-model="description"
-                type="textarea"
-                :rows="8"
-                :disabled="batchGenerating"
-                placeholder="请输入自然语言描述，例如：
-创建一个订单表，包含订单号、用户ID、金额、下单时间等字段"
-              />
-            </el-card>
-            
-            <div v-else class="batch-upload-section">
-              <el-upload
-                ref="batchUpload"
-                :auto-upload="false"
-                :on-change="handleBatchFileChange"
-                :limit="1"
-                accept=".xlsx"
-                :disabled="batchGenerating"
-              >
-                <el-button type="primary" plain :disabled="batchGenerating">
-                  <span>📁</span> 选择Excel文件
-                </el-button>
-              </el-upload>
-              <el-button type="success" @click="downloadBatchTemplate" :disabled="batchGenerating">
-                <span>📥</span> 下载模板
-              </el-button>
-            </div>
-
-            <div v-if="generationMode === 'excel' && batchFileName" class="batch-file-info">
-              <el-tag effect="dark">{{ batchFileName }}</el-tag>
-              <span class="batch-file-hint">已选择文件，可点击"开始生成"按钮</span>
-            </div>
-
-            <div v-if="generationMode === 'excel' && parsedBatchTables.length > 0" class="batch-preview">
-              <div class="preview-title">📋 解析预览 ({{ parsedBatchTables.length }} 张表)</div>
-              <el-table :data="parsedBatchTables" size="small" max-height="700" stripe>
-                <el-table-column type="index" label="序号" width="70" :index="(index) => index + 1" />
-                <el-table-column prop="layer" label="分层" width="100" />
-                <el-table-column prop="subjectDomain" label="主题域" width="120" />
-                <el-table-column prop="tableName" label="表名" width="260" />
-                <el-table-column prop="fieldCount" label="字段数量" width="100" />
-                <el-table-column prop="fields" label="字段明细" show-overflow-tooltip />
-              </el-table>
-            </div>
-
-            <div class="batch-config-row">
-              <div class="config-item">
-                <span class="config-label">数据库类型：</span>
-                <el-select v-model="batchDbType" style="width: 150px" :disabled="batchGenerating">
-                  <el-option label="🐬 MySQL" value="mysql" />
-                  <el-option label="🐘 PostgreSQL" value="postgresql" />
-                  <el-option label="🔶 Oracle" value="oracle" />
-                </el-select>
-              </div>
-              <div class="config-item">
-                <span class="config-label">词根匹配：</span>
-                <el-select v-model="batchRootPriority" style="width: 150px" :disabled="batchGenerating">
-                  <el-option label="🌟 优先全称" value="full" />
-                  <el-option label="🔤 优先缩写" value="abbr" />
-                </el-select>
-              </div>
-              <div class="config-item">
-                <span class="config-label">分词模式：</span>
-                <el-select v-model="batchCutMode" style="width: 180px" :disabled="batchGenerating">
-                  <el-option label="🎯 精准模式" value="accurate" />
-                  <el-option label="📊 全模式" value="full" />
-                  <el-option label="🔍 搜索引擎模式" value="search" />
-                </el-select>
-              </div>
-              <div class="config-item">
-                <span class="config-label">最终校验：</span>
-                <el-switch v-model="batchEnableValidation" :disabled="batchGenerating" active-text="开启" inactive-text="关闭" />
-                <span class="config-hint">（关闭可提高生成速度）</span>
-              </div>
-              <div v-if="generationMode === 'excel'" class="config-item">
-                <span class="config-label">并发线程：</span>
-                <el-select v-model="batchMaxWorkers" style="width: 120px" :disabled="batchGenerating">
-                  <el-option v-for="num in 10" :key="num" :label="num + ' 个'" :value="num" />
-                </el-select>
-                <span class="config-hint">（1-10个线程）</span>
-              </div>
-            </div>
-
-            <div class="batch-action">
-              <el-button 
-                type="success" 
-                size="large" 
-                @click="startGenerate" 
-                :loading="batchGenerating"
-                :disabled="!llmConfig.apiKey || (generationMode === 'excel' ? !batchFile : !description.trim())"
-                class="generate-btn"
-              >
-                <span v-if="!batchGenerating">✨</span>
-                {{ batchGenerating ? '生成中...' : (generationMode === 'excel' ? '开始生成' : '开始解析并生成') }}
-              </el-button>
-              <el-button 
-                v-if="batchGenerating"
-                type="danger" 
-                size="large" 
-                @click="cancelBatchTask"
-                class="cancel-btn"
-              >
-                ⛔ 终止任务
-              </el-button>
-            </div>
-
-            <div v-if="batchGenerating || batchResult" class="batch-progress-section">
-              <div class="progress-header">
-                <span class="progress-title">📊 建表进度</span>
-                <span class="progress-text">{{ batchProgress }}</span>
-              </div>
-              <el-progress 
-                :percentage="batchProgressPercent" 
-                :status="batchResult ? 'success' : 'active'"
-                :show-text="false"
-                stroke-width="8"
-              />
-              
-              <div v-if="realProgress && realProgress.milestones && realProgress.milestones.length > 0" class="milestone-section">
-                <div class="milestone-track">
-                  <div 
-                    v-for="(milestone, index) in realProgress.milestones" 
-                    :key="milestone.step"
-                    class="milestone-item"
-                    v-show="!milestone.optional || milestone.status !== 'pending'"
-                  >
-                    <div :class="['milestone-circle', milestone.status]">
-                      <span v-if="milestone.status === 'completed'">✓</span>
-                      <span v-else-if="milestone.status === 'active'">{{ milestone.step }}</span>
-                      <span v-else>{{ milestone.step }}</span>
-                    </div>
-                    <div class="milestone-icon">{{ milestone.icon }}</div>
-                    <div class="milestone-title">{{ milestone.title }}</div>
-                    <div v-if="milestone.sub_progress" class="milestone-sub">
-                      {{ milestone.sub_progress }}
-                    </div>
-                    <div v-if="index < realProgress.milestones.length - 1" class="milestone-line">
-                      <div :class="['line-fill', milestone.status === 'completed' ? 'completed' : '']"></div>
-                    </div>
+              <div class="panel-body">
+                <div class="config-item generation-mode-row">
+                  <span class="config-label">输入方式：</span>
+                  <div class="segment generation-segment">
+                    <button type="button" :class="{ active: generationMode === 'text' }" :disabled="batchGenerating" @click="generationMode = 'text'">文本输入</button>
+                    <button type="button" :class="{ active: generationMode === 'excel' }" :disabled="batchGenerating" @click="generationMode = 'excel'">Excel上传</button>
                   </div>
                 </div>
-              </div>
-              
-              <div v-if="fieldProgressAvailable" class="field-progress-section">
-                <div class="field-stats-title">🔎 字段生成进度</div>
-                <div class="field-progress-line">
-                  <span>{{ fieldProgress.phase_label || '字段生成中' }}</span>
-                  <span v-if="fieldProgress.thread_count !== undefined">线程 {{ fieldProgress.thread_count }}</span>
-                  <span v-if="fieldProgress.batch_count !== undefined">批次 {{ fieldProgress.completed_batches || 0 }}/{{ fieldProgress.batch_count || 0 }}</span>
-                  <span v-if="fieldProgress.current_batch">当前第 {{ fieldProgress.current_batch }} 批</span>
-                  <span v-if="fieldProgress.total_items !== undefined">
-                    {{ fieldProgress.completed_items || 0 }}/{{ fieldProgress.total_items || 0 }} {{ fieldProgress.target_item_label || '项' }}
-                  </span>
-                </div>
-                <el-progress
-                  :percentage="fieldProgressPercent"
-                  :show-text="true"
-                  stroke-width="6"
-                />
-                <div v-if="fieldProgress.unique_root_count !== undefined" class="field-progress-hint">
-                  去重后词根：{{ fieldProgress.unique_root_count }} 个
-                  <span v-if="fieldProgress.raw_root_count !== undefined">，原始词根：{{ fieldProgress.raw_root_count }} 个</span>
-                  <span v-if="fieldProgress.layer1_count !== undefined">
-                    ，分层：Layer1 {{ fieldProgress.layer1_count }} / Layer2 {{ fieldProgress.layer2_count }} / Layer3 {{ fieldProgress.layer3_count }}
-                  </span>
-                </div>
-              </div>
 
-              <div v-if="fieldStatsAvailable" class="field-stats-section">
-                <div class="field-stats-title">📈 字段匹配统计</div>
-                <div class="field-stats-grid">
-                  <div class="field-stat-item matched">
+                <div v-if="generationMode === 'text'" class="panel sub-panel text-input-card">
+                  <div class="panel-header">
+                    <div class="card-title"><Document />建表需求</div>
+                  </div>
+                  <div class="panel-body">
+                    <el-input
+                      v-model="description"
+                      type="textarea"
+                      :rows="8"
+                      :disabled="batchGenerating"
+                      placeholder="请输入自然语言描述，例如：
+创建一个订单表，包含订单号、用户ID、金额、下单时间等字段"
+                    />
+                  </div>
+                </div>
+
+                <div v-else class="upload-section generation-upload-section">
+                  <el-upload
+                    ref="batchUpload"
+                    :auto-upload="false"
+                    :on-change="handleBatchFileChange"
+                    :limit="1"
+                    accept=".xlsx"
+                    :disabled="batchGenerating"
+                  >
+                    <el-button type="primary" plain :disabled="batchGenerating"><FolderOpened />选择Excel文件</el-button>
+                  </el-upload>
+                  <el-button type="success" @click="downloadBatchTemplate" :disabled="batchGenerating"><FolderChecked />下载模板</el-button>
+                  <span class="config-hint">{{ batchFileName || '选择 Excel 文件后，可点击“开始生成”按钮' }}</span>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel preview-panel">
+                <div class="panel-header">
+                  <div class="card-title"><Operation />解析预览</div>
+                </div>
+                <div class="panel-body">
+                  <div v-if="generationMode === 'excel' && parsedBatchTables.length > 0" class="table-wrap">
+                    <el-table :data="parsedBatchTables" size="small" max-height="280">
+                      <el-table-column type="index" label="序号" width="70" :index="(index) => index + 1" />
+                      <el-table-column prop="layer" label="分层" width="90" />
+                      <el-table-column prop="subjectDomain" label="主题域" width="110" />
+                      <el-table-column prop="tableName" label="表名" min-width="180" show-overflow-tooltip />
+                      <el-table-column prop="fieldCount" label="字段数量" width="100" />
+                    </el-table>
+                  </div>
+                  <el-empty v-else description="Excel 解析后将在这里预览表结构" />
+                </div>
+              </section>
+          </div>
+
+          <section class="panel generation-params-panel">
+            <div class="panel-body">
+              <div class="config-row generation-config-row">
+                <div class="config-item">
+                  <span class="config-label">数据库类型：</span>
+                  <el-select v-model="batchDbType" style="width: 150px" :disabled="batchGenerating">
+                    <el-option label="MySQL" value="mysql" />
+                    <el-option label="PostgreSQL" value="postgresql" />
+                    <el-option label="Oracle" value="oracle" />
+                  </el-select>
+                </div>
+                <div class="config-item">
+                  <span class="config-label">词根匹配：</span>
+                  <el-select v-model="batchRootPriority" style="width: 150px" :disabled="batchGenerating">
+                    <el-option label="优先全称" value="full" />
+                    <el-option label="优先缩写" value="abbr" />
+                  </el-select>
+                </div>
+                <div class="config-item">
+                  <span class="config-label">分词模式：</span>
+                  <el-select v-model="batchCutMode" style="width: 180px" :disabled="batchGenerating">
+                    <el-option label="精准模式" value="accurate" />
+                    <el-option label="全模式" value="full" />
+                    <el-option label="搜索引擎模式" value="search" />
+                  </el-select>
+                </div>
+                <div class="config-item">
+                  <span class="config-label">最终校验：</span>
+                  <el-switch v-model="batchEnableValidation" :disabled="batchGenerating" active-text="开启" inactive-text="关闭" />
+                  <span class="config-hint">关闭可提高生成速度</span>
+                </div>
+                <div v-if="generationMode === 'excel'" class="config-item">
+                  <span class="config-label">并发线程：</span>
+                  <el-select v-model="batchMaxWorkers" style="width: 120px" :disabled="batchGenerating">
+                    <el-option v-for="num in 10" :key="num" :label="num + ' 个'" :value="num" />
+                  </el-select>
+                </div>
+              </div>
+              <div class="action-row generation-action-row">
+                <el-button
+                  type="success"
+                  @click="startGenerate"
+                  :loading="batchGenerating"
+                  :disabled="!llmConfig.apiKey || (generationMode === 'excel' ? !batchFile : !description.trim())"
+                >
+                  <Lightning />{{ batchGenerating ? '生成中...' : (generationMode === 'excel' ? '开始生成' : '开始解析并生成') }}
+                </el-button>
+                <el-button v-if="batchGenerating" type="danger" @click="cancelBatchTask">
+                  终止任务
+                </el-button>
+              </div>
+            </div>
+          </section>
+
+          <section v-if="batchGenerating || batchResult" class="panel generation-progress-panel">
+            <div class="panel-header">
+              <div class="card-title"><DataAnalysis />建表进度</div>
+            </div>
+            <div class="panel-body">
+              <div class="progress-card generation-progress-card">
+                <div class="progress-header">
+                  <span class="progress-title">建表进度</span>
+                  <span class="progress-text">{{ batchProgress || '准备中' }} · {{ batchProgressPercent }}%</span>
+                </div>
+                <div class="progress-bar">
+                  <div class="progress-fill" :style="{ width: batchProgressPercent + '%' }"></div>
+                </div>
+
+                <div class="milestone-track">
+                  <div
+                    v-for="milestone in generationMilestones"
+                    :key="milestone.step"
+                    class="milestone-item"
+                    :class="{ done: milestone.status === 'completed', active: milestone.status === 'active' }"
+                  >
+                    <div class="milestone-step">{{ milestone.status === 'completed' ? '✓' : milestone.step }}</div>
+                    <div class="milestone-title">{{ milestone.title }}</div>
+                    <div v-if="milestone.sub_progress" class="milestone-sub">{{ milestone.sub_progress }}</div>
+                  </div>
+                </div>
+
+                <div v-if="fieldProgressAvailable" class="field-progress-section">
+                  <div class="field-progress-line">
+                    <span>{{ fieldProgress.phase_label || '字段生成中' }}</span>
+                    <span v-if="fieldProgress.thread_count !== undefined">线程 {{ fieldProgress.thread_count }}</span>
+                    <span v-if="fieldProgress.batch_count !== undefined">批次 {{ fieldProgress.completed_batches || 0 }}/{{ fieldProgress.batch_count || 0 }}</span>
+                    <span v-if="fieldProgress.current_batch">当前第 {{ fieldProgress.current_batch }} 批</span>
+                    <span v-if="fieldProgress.total_items !== undefined">
+                      {{ fieldProgress.completed_items || 0 }}/{{ fieldProgress.total_items || 0 }} {{ fieldProgress.target_item_label || '项' }}
+                    </span>
+                  </div>
+                  <el-progress :percentage="fieldProgressPercent" :show-text="true" stroke-width="6" />
+                </div>
+
+                <div v-if="fieldStatsAvailable" class="stat-grid">
+                  <div class="stat-item">
                     <div class="stat-value">{{ fieldStats.matched_count }}</div>
                     <div class="stat-label">历史词根匹配</div>
                   </div>
-                  <div class="field-stat-item llm">
+                  <div class="stat-item">
                     <div class="stat-value">{{ fieldStats.unmatched_count }}</div>
                     <div class="stat-label">需要 LLM 生成</div>
                   </div>
-                  <div class="field-stat-item total">
+                  <div class="stat-item">
                     <div class="stat-value">{{ fieldStats.total_fields }}</div>
                     <div class="stat-label">去重词根数</div>
                   </div>
                 </div>
               </div>
             </div>
-          </el-card>
+          </section>
 
-          <el-card class="new-roots-card" shadow="hover">
-            <div class="new-roots-header">
-              <span class="new-roots-title">🌱 发现新词根</span>
-              <el-tag type="warning" size="small">{{ batchNewRoots.length }} 个</el-tag>
-              <el-button type="success" size="small" @click="saveBatchNewRoots" class="save-roots-btn" :disabled="batchNewRoots.length === 0">
-                💾 保存到历史词根
-              </el-button>
-            </div>
-            <div class="new-roots-list">
-              <el-table v-if="batchNewRoots.length > 0" :data="batchNewRoots" size="small" max-height="600" stripe>
-                <el-table-column prop="chinese_name" label="中文名" width="120" />
-                <el-table-column prop="full_root" label="词根全称" width="150" />
-                <el-table-column prop="abbr_root" label="缩写" width="100" />
-                <el-table-column prop="recommended_type" label="推荐类型" width="120" />
-                <el-table-column prop="business_domain" label="业务域" />
-              </el-table>
-              <el-empty v-else description="暂无新词根，生成 DDL 后将自动显示" />
-            </div>
-          </el-card>
-          </div>
-          <el-card v-if="batchResult" class="result-card" shadow="hover">
-            <template #header>
-              <div class="card-header">
-                <span class="card-title">🎯 生成结果</span>
+          <div v-if="batchResult || batchNewRoots.length > 0" class="layout-2 generation-output-layout">
+            <section v-if="batchResult" class="panel result-card generation-result-panel">
+              <div class="panel-header">
+                <div class="card-title"><Document />生成结果</div>
                 <div class="header-actions">
-                  <el-button type="primary" plain size="small" @click="copyBatchDDL">
-                    复制全部SQL
-                  </el-button>
-                  <el-button type="success" plain size="small" @click="downloadBatchDDL">
-                    下载SQL文件
-                  </el-button>
+                  <el-button type="primary" plain size="small" @click="copyBatchDDL">复制全部SQL</el-button>
+                  <el-button type="success" plain size="small" @click="downloadBatchDDL">下载SQL文件</el-button>
                 </div>
               </div>
-            </template>
-            
-            <div class="batch-result-stats">
-              <el-tag type="success" size="small">成功: {{ batchResult.success_count }}</el-tag>
-              <el-tag v-if="batchResult.error_count > 0" type="danger" size="small">失败: {{ batchResult.error_count }}</el-tag>
-              <el-tag type="info" size="small">⏱️ 耗时: {{ batchResult.elapsed_time_str || '--' }}</el-tag>
-            </div>
-
-            <div v-if="batchResult.errors && batchResult.errors.length > 0" class="batch-errors">
-              <div class="error-title">⚠️ 错误信息：</div>
-              <div v-for="(error, index) in batchResult.errors" :key="index" class="error-item">
-                {{ error }}
-              </div>
-            </div>
-
-            <div v-if="batchResult.validation_info" class="validation-section">
-              <div class="validation-stats">
-                <el-tag type="danger" size="small">错误: {{ batchResult.validation_info.error_count }}</el-tag>
-                <el-tag type="warning" size="small">警告: {{ batchResult.validation_info.warning_count }}</el-tag>
-                <el-tag v-if="batchResult.validation_info.corrected" type="success" size="small">✅ 已自动修正</el-tag>
-              </div>
-              
-              <div v-if="batchResult.validation_info.violations && batchResult.validation_info.violations.length > 0" class="violations-section">
-                <div class="section-header">
-                  <span>📋 违规详情</span>
-                  <el-button type="text" size="small" @click="showViolations = !showViolations">
-                    {{ showViolations ? '收起' : '展开' }}
-                  </el-button>
+              <div class="panel-body">
+                <div class="batch-result-stats">
+                  <el-tag type="success" size="small">成功: {{ batchResult.success_count }}</el-tag>
+                  <el-tag v-if="batchResult.error_count > 0" type="danger" size="small">失败: {{ batchResult.error_count }}</el-tag>
+                  <el-tag type="info" size="small">耗时: {{ batchResult.elapsed_time_str || '--' }}</el-tag>
+                  <el-tag v-if="batchResult.validation_info?.corrected" type="success" size="small">已自动修正</el-tag>
                 </div>
-                <div v-if="showViolations" class="violations-list">
-                  <div v-for="(violation, index) in batchResult.validation_info.violations" :key="index" 
-                       class="violation-item" :class="violation.level === 'error' ? 'error' : 'warning'">
-                    <span class="violation-level">{{ violation.level === 'error' ? '❌' : '⚠️' }}</span>
-                    <span class="violation-message">{{ violation.message }}</span>
+
+                <div v-if="batchResult.errors && batchResult.errors.length > 0" class="batch-errors">
+                  <div class="error-title">错误信息：</div>
+                  <div v-for="(error, index) in batchResult.errors" :key="index" class="error-item">{{ error }}</div>
+                </div>
+
+                <div v-if="batchResult.validation_info && batchResult.validation_info.violations && batchResult.validation_info.violations.length > 0" class="violations-section">
+                  <div class="section-header">
+                    <span>违规详情</span>
+                    <el-button type="text" size="small" @click="showViolations = !showViolations">
+                      {{ showViolations ? '收起' : '展开' }}
+                    </el-button>
                   </div>
-                  <div v-if="batchResult.validation_info.total_violations > batchResult.validation_info.violations.length" 
-                       class="violations-more">
-                    还有 {{ batchResult.validation_info.total_violations - batchResult.validation_info.violations.length }} 条违规未显示
+                  <div v-if="showViolations" class="violations-list">
+                    <div
+                      v-for="(violation, index) in batchResult.validation_info.violations"
+                      :key="index"
+                      class="violation-item"
+                      :class="violation.level === 'error' ? 'error' : 'warning'"
+                    >
+                      <span class="violation-message">{{ violation.message }}</span>
+                    </div>
                   </div>
                 </div>
+
+                <div class="sql-container">
+                  <pre class="sql-output" v-html="highlightSQL(batchResult.full_ddl)"></pre>
+                </div>
               </div>
+            </section>
 
-            </div>
-
-            <div class="sql-container">
-              <pre class="sql-output" v-html="highlightSQL(batchResult.full_ddl)"></pre>
-            </div>
-          </el-card>
+            <section class="panel new-roots-card generation-new-roots">
+              <div class="panel-header">
+                <div class="card-title"><TrendCharts />发现新词根</div>
+                <div class="header-actions">
+                  <el-tag type="warning" size="small">{{ batchNewRoots.length }} 个</el-tag>
+                  <el-button type="success" size="small" @click="saveBatchNewRoots" :disabled="batchNewRoots.length === 0"><FolderChecked />保存到历史词根</el-button>
+                </div>
+              </div>
+              <div class="panel-body">
+                <div v-if="batchNewRoots.length > 0" class="table-wrap">
+                  <el-table :data="batchNewRoots" size="small" max-height="360">
+                    <el-table-column prop="chinese_name" label="中文名" width="120" />
+                    <el-table-column prop="full_root" label="词根全称" width="150" />
+                    <el-table-column prop="abbr_root" label="缩写" width="100" />
+                    <el-table-column prop="recommended_type" label="推荐类型" width="120" />
+                    <el-table-column prop="business_domain" label="业务域" min-width="120" />
+                  </el-table>
+                </div>
+                <el-empty v-else description="暂无新词根，生成 DDL 后将自动显示" />
+              </div>
+            </section>
+          </div>
         </div>
 
         <div v-show="activeMenu === 'history'" class="history-view">
@@ -762,8 +797,8 @@
               <el-empty description="暂无建表记录" />
             </div>
             
-            <div v-else class="history-list">
-              <el-table :data="historyList" size="small" stripe height="100%">
+            <div v-else class="history-list table-wrap">
+              <el-table :data="historyList" size="small" stripe height="100%" class="history-table" :fit="false">
                 <el-table-column prop="id" label="ID" width="80" />
                 <el-table-column prop="type" label="类型" width="80">
                   <template #default="scope">
@@ -772,17 +807,21 @@
                     </el-tag>
                   </template>
                 </el-table-column>
-                <el-table-column prop="description" label="描述" />
-                <el-table-column prop="tables_count" label="表数量" width="80" />
-                <el-table-column prop="success_count" label="成功数" width="80" />
-                <el-table-column prop="db_type" label="数据库类型" width="120">
+                <el-table-column label="描述" min-width="260" show-overflow-tooltip>
+                  <template #default="scope">
+                    {{ formatHistoryDescription(scope.row.description) }}
+                  </template>
+                </el-table-column>
+                <el-table-column prop="tables_count" label="表数量" width="78" />
+                <el-table-column prop="success_count" label="成功数" width="78" />
+                <el-table-column prop="db_type" label="数据库类型" width="112">
                   <template #default="scope">
                     <el-tag :type="scope.row.db_type ? 'info' : ''">
                       {{ formatDbType(scope.row.db_type) }}
                     </el-tag>
                   </template>
                 </el-table-column>
-                <el-table-column prop="root_match_priority" label="词根匹配" width="100">
+                <el-table-column prop="root_match_priority" label="词根匹配" width="96">
                   <template #default="scope">
                     <el-tag :type="scope.row.root_match_priority ? 'warning' : ''">
                       {{ formatRootPriority(scope.row.root_match_priority) }}
@@ -794,7 +833,7 @@
                     {{ formatTimestamp(scope.row.timestamp) }}
                   </template>
                 </el-table-column>
-                <el-table-column label="建表记录" width="220">
+                <el-table-column label="建表记录" width="170" show-overflow-tooltip>
                   <template #default="scope">
                     <div v-if="scope.row.execute_status" class="execute-record-cell">
                       <el-tag :type="scope.row.execute_status === 'success' ? 'success' : 'danger'" size="small">
@@ -805,14 +844,14 @@
                     <span v-else class="execute-record-empty">未执行</span>
                   </template>
                 </el-table-column>
-                <el-table-column label="操作" width="200">
+                <el-table-column label="操作" width="140">
                   <template #default="scope">
-                    <el-button size="small" @click="viewHistoryDDL(scope.row)">查看</el-button>
-                    <el-button size="small" type="success" @click="downloadHistoryDDL(scope.row.id)">下载</el-button>
-                    <el-button size="small" type="danger" @click="deleteHistoryRecord(scope.row.id)">删除</el-button>
+                    <el-button size="small" link @click="viewHistoryDDL(scope.row)">查看</el-button>
+                    <el-button size="small" link type="success" @click="downloadHistoryDDL(scope.row.id)">下载</el-button>
+                    <el-button size="small" link type="danger" @click="deleteHistoryRecord(scope.row.id)">删除</el-button>
                   </template>
                 </el-table-column>
-                <el-table-column label="一键建表" width="120" fixed="right">
+                <el-table-column label="一键建表" width="96" fixed="right">
                   <template #default="scope">
                     <el-button size="small" type="primary" @click="showExecuteDialog(scope.row)">建表</el-button>
                   </template>
@@ -821,231 +860,136 @@
             </div>
           </el-card>
         </div>
-              <div v-show="activeMenu === 'governance'" class="governance-view">
-          <el-card class="config-card" shadow="hover">
-            <template #header>
-              <div class="card-header">
-                <span class="card-title">📝 词根输入</span>
-                <div class="header-actions">
-                  <el-button type="primary" plain size="small" @click="previewWordRootsInput">
-                    解析预览
-                  </el-button>
-                  <el-button type="success" size="small" @click="saveWordRoots">
-                    保存到标准词根
-                  </el-button>
+        <div v-if="activeMenu === 'governance'" class="governance-view workbench-page">
+          <section class="panel governance-main-panel">
+            <div class="panel-header">
+              <div class="card-title governance-title"><FolderChecked />标准词根治理</div>
+              <div class="header-actions">
+                <el-button type="primary" size="small" :loading="governanceRunning" @click="runGovernance">发起治理</el-button>
+                <el-button type="success" size="small" :disabled="governanceCandidates.length === 0" @click="applyGovernance">应用结果</el-button>
+                <el-button type="info" plain size="small" @click="loadGovernanceData">刷新</el-button>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div class="progress-card governance-progress-card">
+                <div class="progress-header">
+                  <span class="progress-title">治理进度</span>
+                  <el-tag :type="governanceRunning ? 'warning' : 'success'">{{ governanceStatusText || '未开始' }}</el-tag>
+                </div>
+                <div class="config-row governance-progress-meta">
+                  <span>原始词根：{{ governanceStats.rawCount }}</span>
+                  <span>整理后：{{ governanceStats.preparedCount }}</span>
+                  <span>剔除标准：{{ governanceStats.excludedStandardCount }}</span>
+                  <span>待治理：{{ governanceStats.filteredCount }}</span>
+                  <span>候选结果：{{ governanceStats.candidateCount }}</span>
+                  <span>已耗时：{{ governanceElapsedText }}</span>
+                </div>
+                <div class="config-row governance-progress-meta" v-if="governanceStats.chunkCount > 0">
+                  <span>总批次：{{ governanceStats.chunkCount }}</span>
+                  <span>并发线程：{{ governanceStats.actualWorkers || governanceStats.requestedWorkers }}</span>
+                  <span>已完成：{{ governanceStats.completedChunks }}/{{ governanceStats.chunkCount }}</span>
+                  <span v-if="governanceStats.activeChunksText">处理中：{{ governanceStats.activeChunksText }}</span>
+                </div>
+                <div class="governance-progress-detail">{{ governanceDetailText || '等待发起治理，系统将依次加载历史词根、清洗去重、构建提示词、请求模型并生成候选标准词根。' }}</div>
+                <div class="milestone-track governance-milestone-track">
+                  <div
+                    v-for="(title, index) in governanceMilestoneTitles"
+                    :key="title"
+                    class="milestone-item"
+                    :class="{ done: index < governanceActiveStep, active: index === governanceActiveStep }"
+                  >
+                    <div class="milestone-step">{{ index + 1 }}</div>
+                    <div class="milestone-title">{{ title }}</div>
+                  </div>
                 </div>
               </div>
-            </template>
-            <el-tabs v-model="wordRootsTab" class="custom-tabs">
-              <el-tab-pane label="粘贴文本" name="text">
-                <el-input
-                  v-model="wordRootsText"
-                  type="textarea"
-                  :rows="6"
-                  placeholder="每行格式：业务域:域编码:中文名称:全称词根:缩写词根:推荐类型
-示例：订单:ord:订单:order:ord:VARCHAR(64)
-仅中文名称必填，其他字段允许为空"
-                />
-              </el-tab-pane>
-              <el-tab-pane label="上传文件" name="file">
-                <div class="upload-section">
-                  <el-upload
-                    ref="wordRootsUpload"
-                    :auto-upload="false"
-                    :on-change="handleWordRootsFileChange"
-                    :limit="1"
-                    accept=".xlsx,.csv,.txt"
-                  >
-                    <el-button type="primary" plain>
-                      <span>📁</span> 选择文件
-                    </el-button>
-                  </el-upload>
-                  <el-button type="success" @click="downloadTemplate">
-                    <span>📥</span> 下载模板
-                  </el-button>
-                </div>
-                <div v-if="wordRootsFileName" class="file-info">
-                  <el-tag effect="dark">{{ wordRootsFileName }}</el-tag>
-                  <el-button type="primary" size="small" @click="previewWordRootsInput">解析预览</el-button>
-                  <el-button type="danger" plain size="small" @click="clearWordRootsFile">清除</el-button>
-                </div>
-              </el-tab-pane>
-            </el-tabs>
-            <div v-if="parsedWordRoots.length > 0" class="preview-table">
-              <div class="preview-title">预览 ({{ parsedWordRoots.length }} 条)</div>
-              <el-table :data="parsedWordRoots" size="small" max-height="220" stripe>
-                <el-table-column prop="business_domain" label="业务域" width="120" />
-                <el-table-column prop="domain_code" label="域编码" width="90" />
-                <el-table-column prop="chinese_name" label="中文名称" width="140" />
-                <el-table-column prop="full_root" label="全称词根" width="160" />
-                <el-table-column prop="abbr_root" label="缩写词根" width="120" />
-                <el-table-column prop="recommended_type" label="推荐类型" min-width="140" />
-              </el-table>
-            </div>
-          </el-card>
 
-          <el-card class="config-card" shadow="hover">
-            <template #header>
-              <div class="card-header">
-                <span class="card-title">标准词根治理</span>
+              <div class="gov-stats">
+                <el-tag type="success">标准词根: {{ standardRoots.length }} 条</el-tag>
+                <el-tag type="primary">治理来源: {{ historicalRoots.length }} 条</el-tag>
+              </div>
+
+              <div class="governance-panels">
+                <div class="governance-panel-column">
+                  <div class="toolbar">
+                    <div class="card-title">历史词根</div>
+                    <div class="header-actions">
+                      <el-button type="primary" plain size="small" @click="saveHistoricalRoots" :disabled="historicalRoots.length === 0">保存</el-button>
+                      <el-button type="info" plain size="small" @click="loadGovernanceData">刷新</el-button>
+                      <el-button type="warning" plain size="small" @click="showAddRootDialog">手动添加</el-button>
+                      <el-button type="danger" plain size="small" @click="clearHistoricalRoots" :disabled="historicalRoots.length === 0">清除全部</el-button>
+                    </div>
+                  </div>
+                  <div class="table-wrap governance-table-wrap">
+                    <el-table :data="filteredHistoricalRoots" size="small" height="320" stripe empty-text="暂无历史词根，生成DDL后会自动记录">
+                      <el-table-column prop="business_domain" label="业务域" width="90" />
+                      <el-table-column prop="domain_code" label="域编码" width="70" />
+                      <el-table-column prop="chinese_name" label="中文名称" width="100" />
+                      <el-table-column prop="full_root" label="全称词根" width="115" />
+                      <el-table-column prop="abbr_root" label="缩写词根" width="90" />
+                      <el-table-column prop="recommended_type" label="推荐类型" width="96" />
+                      <el-table-column label="操作" width="76">
+                        <template #default="{ row }">
+                          <el-button type="primary" link size="small" @click="editHistoricalRoot(row)">编辑</el-button>
+                          <el-button type="danger" link size="small" @click="removeHistoricalRoot(row)">删除</el-button>
+                        </template>
+                      </el-table-column>
+                    </el-table>
+                  </div>
+                </div>
+                <div class="governance-panel-column">
+                  <div class="toolbar">
+                    <div class="card-title">治理结果</div>
+                  </div>
+                  <div class="table-wrap governance-table-wrap">
+                    <el-table :data="governanceCandidates" size="small" height="320" stripe empty-text="点击“发起治理”后，这里会展示待应用的标准词根候选">
+                      <el-table-column prop="business_domain" label="业务域" width="90" />
+                      <el-table-column prop="domain_code" label="域编码" width="70" />
+                      <el-table-column prop="chinese_name" label="中文名称" width="100" />
+                      <el-table-column prop="full_root" label="全称词根" width="115" />
+                      <el-table-column prop="abbr_root" label="缩写词根" width="90" />
+                      <el-table-column prop="recommended_type" label="推荐类型" width="96" />
+                      <el-table-column prop="governance_status" label="治理状态" width="88" />
+                    </el-table>
+                  </div>
+                </div>
+              </div>
+
+              <div class="toolbar standard-roots-toolbar">
+                <div class="card-title">当前标准词根</div>
                 <div class="header-actions">
-                  <el-button type="primary" size="small" :loading="governanceRunning" @click="runGovernance">
-                    发起治理
-                  </el-button>
-                  <el-button
-                    type="success"
-                    size="small"
-                    :disabled="governanceCandidates.length === 0"
-                    @click="applyGovernance"
-                  >
-                    应用结果
-                  </el-button>
-                  <el-button type="primary" plain size="small" @click="loadGovernanceData">刷新</el-button>
-                </div>
-              </div>
-            </template>
-            <div v-if="governanceProgressVisible" class="governance-progress-card">
-              <div class="governance-progress-header">
-                <span class="governance-panel-title">治理进度</span>
-                <el-tag :type="governanceRunning ? 'warning' : 'success'">
-                  {{ governanceStatusText || '未开始' }}
-                </el-tag>
-              </div>
-              <div class="governance-progress-meta">
-                <span>原始词根：{{ governanceStats.rawCount }}</span>
-                <span>整理后：{{ governanceStats.preparedCount }}</span>
-                <span>剔除标准：{{ governanceStats.excludedStandardCount }}</span>
-                <span>待治理：{{ governanceStats.filteredCount }}</span>
-                <span>候选结果：{{ governanceStats.candidateCount }}</span>
-                <span>已耗时：{{ governanceElapsedText }}</span>
-              </div>
-              <div class="governance-progress-meta" v-if="governanceStats.chunkCount > 0">
-                <span>总批次：{{ governanceStats.chunkCount }}</span>
-                <span>并发线程：{{ governanceStats.actualWorkers || governanceStats.requestedWorkers }}</span>
-                <span>已完成：{{ governanceStats.completedChunks }}/{{ governanceStats.chunkCount }}</span>
-                <span v-if="governanceStats.activeChunksText">处理中：{{ governanceStats.activeChunksText }}</span>
-              </div>
-              <div class="governance-progress-detail">
-                {{ governanceDetailText }}
-              </div>
-              <el-steps :active="governanceActiveStep" finish-status="success" simple>
-                <el-step title="加载历史词根" />
-                <el-step title="清洗去重" />
-                <el-step title="构建治理提示词" />
-                <el-step title="发送模型请求" />
-                <el-step title="等待模型响应" />
-                <el-step title="解析返回结果" />
-                <el-step title="生成候选词根" />
-              </el-steps>
-              <el-progress
-                :percentage="governanceProgressPercent"
-                :status="governanceRunning ? '' : 'success'"
-                style="margin-top: 12px;"
-              />
-            </div>
-            <div class="gov-stats" style="margin-bottom: 12px">
-              <el-tag type="success">标准词根: {{ standardRoots.length }} 条</el-tag>
-              <el-tag type="info" style="margin-left: 10px">治理来源: {{ historicalRoots.length }} 条</el-tag>
-            </div>
-            <div class="governance-panels">
-              <div class="governance-panel">
-                <div class="governance-panel-title">历史词根</div>
-                <div class="header-actions governance-toolbar">
-                  <el-input
-                    v-model="rootSearchQuery"
-                    placeholder="搜索词根（中文或英文）"
-                    size="small"
-                    clearable
-                    class="governance-search"
-                  />
-                  <el-button type="primary" plain size="small" @click="saveHistoricalRoots" :disabled="historicalRoots.length === 0">
-                    保存
-                  </el-button>
+                  <el-input v-model="standardRootSearchQuery" placeholder="搜索标准词根（中文或英文）" size="small" clearable class="governance-search" />
                   <el-button type="info" plain size="small" @click="loadGovernanceData">刷新</el-button>
-                  <el-button type="warning" plain size="small" @click="showAddRootDialog">手动添加</el-button>
-                  <el-button type="danger" plain size="small" @click="clearHistoricalRoots" :disabled="historicalRoots.length === 0">
-                    清除全部
-                  </el-button>
+                  <el-button type="warning" plain size="small" @click="showAddRootDialog('standard')">手动添加</el-button>
+                  <el-upload ref="standardRootsUpload" :auto-upload="false" :show-file-list="false" :on-change="handleStandardRootsImportFileChange" :limit="1" accept=".xlsx,.csv,.txt">
+                    <el-button type="primary" plain size="small">Excel导入</el-button>
+                  </el-upload>
+                  <el-button type="success" plain size="small" @click="exportStandardRootsToExcel" :disabled="standardRoots.length === 0">导出Excel</el-button>
                 </div>
-                <el-table v-if="filteredHistoricalRoots.length > 0" :data="filteredHistoricalRoots" size="small" max-height="320" stripe>
-                  <el-table-column prop="business_domain" label="业务域" width="120" />
-                  <el-table-column prop="domain_code" label="域编码" width="90" />
-                  <el-table-column prop="chinese_name" label="中文名称" width="140" />
-                  <el-table-column prop="full_root" label="全称词根" width="150" />
-                  <el-table-column prop="abbr_root" label="缩写词根" width="120" />
-                  <el-table-column prop="recommended_type" label="推荐类型" min-width="120" />
-                  <el-table-column label="操作" width="100">
-                    <template #default="{ row }">
-                      <el-button type="primary" link size="small" @click="editHistoricalRoot(row)">编辑</el-button>
-                      <el-button type="danger" link size="small" @click="removeHistoricalRoot(row)">删除</el-button>
-                    </template>
-                  </el-table-column>
-                </el-table>
-                <el-empty v-else description="暂无历史词根，生成DDL后会自动记录" />
               </div>
-              <div class="governance-panel">
-                <div class="governance-panel-title">治理结果</div>
-                <el-empty
-                  v-if="governanceCandidates.length === 0"
-                  description="点击“发起治理”后，这里会展示待应用的标准词根候选"
-                />
-                <el-table v-else :data="governanceCandidates" size="small" max-height="320" stripe>
+              <div class="table-wrap governance-standard-table">
+                <el-table :data="filteredStandardRoots" size="small" max-height="320" stripe :fit="false">
                   <el-table-column prop="business_domain" label="业务域" width="100" />
                   <el-table-column prop="domain_code" label="域编码" width="80" />
                   <el-table-column prop="chinese_name" label="中文名称" width="120" />
                   <el-table-column prop="full_root" label="全称词根" width="150" />
                   <el-table-column prop="abbr_root" label="缩写词根" width="100" />
                   <el-table-column prop="recommended_type" label="推荐类型" width="120" />
-                  <el-table-column prop="governance_status" label="治理状态" width="100" />
+                  <el-table-column prop="updated_at" label="最近修改" width="170" />
+                  <el-table-column label="操作" width="160">
+                    <template #default="{ row }">
+                      <el-button type="primary" link size="small" @click="editStandardRoot(row)">编辑</el-button>
+                      <el-button type="danger" link size="small" @click="removeStandardRoot(row)">删除</el-button>
+                      <el-button type="info" link size="small" @click="showStandardRootHistory(row)">记录</el-button>
+                    </template>
+                  </el-table-column>
                 </el-table>
               </div>
             </div>
-            <div class="governance-panel-title" style="margin-top: 16px;">当前标准词根</div>
-            <div class="header-actions governance-toolbar" style="margin-bottom: 12px;">
-              <el-input
-                v-model="standardRootSearchQuery"
-                placeholder="搜索标准词根（中文或英文）"
-                size="small"
-                clearable
-                class="governance-search"
-              />
-              <el-button type="info" plain size="small" @click="loadGovernanceData">刷新</el-button>
-              <el-button type="warning" plain size="small" @click="showAddRootDialog('standard')">手动添加</el-button>
-              <el-upload
-                ref="standardRootsUpload"
-                :auto-upload="false"
-                :show-file-list="false"
-                :on-change="handleStandardRootsImportFileChange"
-                :limit="1"
-                accept=".xlsx,.csv,.txt"
-              >
-                <el-button type="primary" plain size="small">Excel导入</el-button>
-              </el-upload>
-              <el-button type="success" plain size="small" @click="exportStandardRootsToExcel" :disabled="standardRoots.length === 0">导出Excel</el-button>
-            </div>
-            <el-table :data="filteredStandardRoots" size="small" max-height="320" stripe>
-              <el-table-column prop="business_domain" label="业务域" width="100" />
-              <el-table-column prop="domain_code" label="域编码" width="80" />
-              <el-table-column prop="chinese_name" label="中文名称" width="120" />
-              <el-table-column prop="full_root" label="全称词根" width="150" />
-              <el-table-column prop="abbr_root" label="缩写词根" width="100" />
-              <el-table-column prop="recommended_type" label="推荐类型" width="120" />
-              <el-table-column prop="updated_at" label="最近修改" width="170" />
-              <el-table-column label="操作" width="160">
-                <template #default="{ row }">
-                  <el-button type="primary" link size="small" @click="editStandardRoot(row)">编辑</el-button>
-                  <el-button type="danger" link size="small" @click="removeStandardRoot(row)">删除</el-button>
-                  <el-button type="info" link size="small" @click="showStandardRootHistory(row)">记录</el-button>
-                </template>
-              </el-table-column>
-            </el-table>
-          </el-card>
+          </section>
         </div>
 </main>
 
-      <footer class="footer">
-        © 2025 数仓建表助手 - AI 驱动的智能 DDL 生成工具
-      </footer>
     </div>
 
     <el-dialog v-model="historyViewDialog" :title="currentHistoryTitle" width="800px">
@@ -1077,7 +1021,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="saveDialogVisible" title="💾 保存配置" width="450px">
+    <el-dialog v-model="saveDialogVisible" title="💾 LLM 配置另存为" width="450px">
       <el-form :model="saveForm" label-width="100px">
         <el-form-item label="配置名称">
           <el-input v-model="saveForm.name" placeholder="请输入配置名称" size="large" />
@@ -1088,7 +1032,7 @@
       </el-form>
       <template #footer>
         <el-button @click="saveDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="saveConfig">保存</el-button>
+        <el-button type="primary" @click="saveLlmConfigAs">保存</el-button>
       </template>
     </el-dialog>
 
@@ -1270,6 +1214,7 @@
 
 <script setup>
 import { ref, reactive, watch, computed, onMounted } from 'vue'
+import { ChatLineSquare, Clock, Coin, Connection, DataAnalysis, Delete, Document, FolderChecked, FolderOpened, InfoFilled, Lightning, Monitor, Operation, Plus, Refresh, Service, Star, Tickets, TrendCharts } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
 import * as XLSX from 'xlsx'
@@ -1386,6 +1331,8 @@ const DEFAULT_PROMPT = `你是一位专业的数据仓库DDL生成专家。请�
 const activeMenu = ref('config')
 const selectedConfig = ref('')
 const savedConfigs = ref([])
+const LLM_CONFIGS_STORAGE_KEY = 'llm_configs'
+const PROJECT_CONFIG_STORAGE_KEY = 'project_basic_config'
 const llmConfig = reactive({
   apiKey: '',
   apiUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
@@ -1412,6 +1359,21 @@ const standardsViewTab = ref('edit')
 const standardsContent = ref('')
 const standardsList = ref([])
 const currentStandardId = ref('')
+const promptSegments = ref([])
+const activePromptSegments = ref([])
+const promptSegmentsLoading = ref(false)
+const promptSegmentsSaving = ref(false)
+const promptSegmentSavingMap = ref({})
+const promptSegmentResettingMap = ref({})
+const promptSegmentsMigrationNotice = ref('')
+const selectedPromptSegmentKey = ref('')
+const selectedPromptSegment = computed(() => {
+  return promptSegments.value.find(item => item.key === selectedPromptSegmentKey.value) || promptSegments.value[0] || null
+})
+
+const formatPromptSegmentTitle = (title = '') => {
+  return String(title || '').replace(/^\s*\d+\s*[.、]\s*/, '')
+}
 
 const batchUpload = ref(null)
 const batchFile = ref(null)
@@ -1443,6 +1405,39 @@ const fieldProgressPercent = computed(() => {
   if (!fieldProgress.value || !fieldProgress.value.total_items) return 0
   return Math.min(100, Math.round(((fieldProgress.value.completed_items || 0) / fieldProgress.value.total_items) * 100))
 })
+const defaultGenerationMilestoneTitles = computed(() => [
+  generationMode.value === 'text' ? '输入解析' : '解析Excel',
+  '字段分组',
+  'jieba分词',
+  '历史词根匹配',
+  '生成字段名',
+  '组装DDL',
+  batchEnableValidation.value ? '最终校验' : '完成建表'
+])
+const generationMilestones = computed(() => {
+  const backendMilestones = realProgress.value?.milestones
+  if (Array.isArray(backendMilestones) && backendMilestones.length > 0) {
+    return backendMilestones
+      .filter(item => !item.optional || item.status !== 'pending')
+      .map((item, index) => ({
+        step: item.step || index + 1,
+        title: item.title || defaultGenerationMilestoneTitles.value[index] || `步骤${index + 1}`,
+        status: item.status || 'pending',
+        sub_progress: item.sub_progress || ''
+      }))
+  }
+
+  const total = defaultGenerationMilestoneTitles.value.length
+  const activeStep = batchResult.value
+    ? total
+    : Math.max(1, Math.min(total, Math.ceil((batchProgressPercent.value || 0) / 100 * total)))
+
+  return defaultGenerationMilestoneTitles.value.map((title, index) => {
+    const step = index + 1
+    const status = step < activeStep || batchResult.value ? 'completed' : (step === activeStep ? 'active' : 'pending')
+    return { step, title, status, sub_progress: '' }
+  })
+})
 let progressPollingInterval = null
 let fallbackProgressInterval = null
 let governanceProgressInterval = null
@@ -1455,7 +1450,6 @@ const currentHistoryDDL = ref('')
 const currentHistoryTitle = ref('')
 const currentHistoryRecord = ref(null)
 
-const customPrompt = ref('')
 const rootMatchPriority = ref('abbr')
 const dbType = ref('mysql')
 const enableValidation = ref(true)
@@ -1526,6 +1520,15 @@ const editingStandardRoot = reactive({
 const governanceProgressVisible = computed(() => governanceRunning.value || governanceStatusText.value || governanceCandidates.value.length > 0)
 const governanceProgressPercent = computed(() => Math.round(((governanceActiveStep.value + 1) / 7) * 100))
 const governanceElapsedText = computed(() => formatDuration(governanceElapsedMs.value))
+const governanceMilestoneTitles = [
+  '加载历史词根',
+  '清洗去重',
+  '构建治理提示词',
+  '发送模型请求',
+  '等待模型响应',
+  '解析返回结果',
+  '生成候选词根'
+]
 
 const filteredHistoricalRoots = computed(() => {
   if (!rootSearchQuery.value) return historicalRoots.value
@@ -1909,64 +1912,39 @@ const parseWordRootsTextInput = () => {
 }
 
 const loadConfigs = async () => {
-  const configs = localStorage.getItem('llm_configs')
+  const configs = localStorage.getItem(LLM_CONFIGS_STORAGE_KEY)
   if (configs) {
     savedConfigs.value = JSON.parse(configs)
     if (savedConfigs.value.length > 0) {
       const defaultConfig = savedConfigs.value.find(c => c.isDefault) || savedConfigs.value[0]
-        selectedConfig.value = defaultConfig.name
-        llmConfig.apiUrl = defaultConfig.apiUrl
-        llmConfig.model = defaultConfig.model
-        llmConfig.temperature = defaultConfig.temperature !== undefined ? defaultConfig.temperature : 0.3
-        llmConfig.abbrMaxLen = defaultConfig.abbrMaxLen !== undefined ? defaultConfig.abbrMaxLen : 4
-        llmConfig.industryContext = defaultConfig.industryContext || ''
-        if (defaultConfig.apiKey) {
-          llmConfig.apiKey = decodeKey(defaultConfig.apiKey)
+      selectedConfig.value = defaultConfig.name
+      llmConfig.apiUrl = defaultConfig.apiUrl
+      llmConfig.model = defaultConfig.model
+      llmConfig.temperature = defaultConfig.temperature !== undefined ? defaultConfig.temperature : 0.3
+      if (defaultConfig.apiKey) {
+        llmConfig.apiKey = decodeKey(defaultConfig.apiKey)
         apiKeySaved.value = true
       } else {
         apiKeySaved.value = false
       }
     }
   }
-  
-  try {
-    const response = await axios.get('/api/custom-prompt')
-    if (response.data.code === 0 && response.data.data) {
-      customPrompt.value = response.data.data
-      return
-    }
-  } catch (error) {
-    console.error('从后端加载提示词失败:', error)
-  }
-  
-  const savedPrompt = localStorage.getItem('custom_prompt')
-  if (savedPrompt) {
-    customPrompt.value = savedPrompt
-    return
-  }
-  
-  if (!customPrompt.value) {
-    customPrompt.value = DEFAULT_PROMPT
-  }
 }
 
-const saveCustomPrompt = async () => {
+const loadProjectConfig = () => {
+  const savedProjectConfig = localStorage.getItem(PROJECT_CONFIG_STORAGE_KEY)
+  if (!savedProjectConfig) return
   try {
-    const response = await axios.post('/api/custom-prompt', { content: customPrompt.value })
-    if (response.data.code === 0) {
-      ElMessage.success('自定义提示词保存成功')
-    } else {
-      ElMessage.error(response.data.message || '保存失败')
-    }
+    const projectConfig = JSON.parse(savedProjectConfig)
+    llmConfig.abbrMaxLen = projectConfig.abbrMaxLen !== undefined ? projectConfig.abbrMaxLen : llmConfig.abbrMaxLen
+    llmConfig.industryContext = projectConfig.industryContext || ''
   } catch (error) {
-    console.error('保存提示词失败:', error)
-    localStorage.setItem('custom_prompt', customPrompt.value)
-    ElMessage.success('自定义提示词保存成功（本地）')
+    console.error('加载项目配置失败:', error)
   }
 }
 
 const saveConfigToStorage = () => {
-  localStorage.setItem('llm_configs', JSON.stringify(savedConfigs.value))
+  localStorage.setItem(LLM_CONFIGS_STORAGE_KEY, JSON.stringify(savedConfigs.value))
 }
 
 const resetApiKey = () => {
@@ -1974,7 +1952,7 @@ const resetApiKey = () => {
   llmConfig.apiKey = ''
 }
 
-const showSaveDialog = () => {
+const showSaveAsDialog = () => {
   if (!llmConfig.apiKey && !apiKeySaved.value) {
     ElMessage.warning('请先输入 API Key')
     return
@@ -1988,7 +1966,34 @@ const showSaveDialog = () => {
   saveForm.isDefault = false
 }
 
-const saveConfig = () => {
+const buildCurrentLlmConfigPayload = (name, isDefault = false) => ({
+  name,
+  apiKey: encodeKey(llmConfig.apiKey),
+  apiUrl: llmConfig.apiUrl,
+  model: llmConfig.model,
+  temperature: llmConfig.temperature,
+  isDefault
+})
+
+const saveCurrentLlmConfig = () => {
+  if (!selectedConfig.value) {
+    showSaveAsDialog()
+    return
+  }
+  const existingIndex = savedConfigs.value.findIndex(c => c.name === selectedConfig.value)
+  if (existingIndex < 0) {
+    showSaveAsDialog()
+    return
+  }
+
+  const previousConfig = savedConfigs.value[existingIndex]
+  savedConfigs.value[existingIndex] = buildCurrentLlmConfigPayload(previousConfig.name, !!previousConfig.isDefault)
+  saveConfigToStorage()
+  apiKeySaved.value = true
+  ElMessage.success(`LLM 配置「${previousConfig.name}」已保存`)
+}
+
+const saveLlmConfigAs = () => {
   if (!saveForm.name) {
     ElMessage.warning('请输入配置名称')
     return
@@ -1996,16 +2001,7 @@ const saveConfig = () => {
   if (saveForm.isDefault) {
     savedConfigs.value.forEach(c => c.isDefault = false)
   }
-    const config = {
-      name: saveForm.name,
-      apiKey: encodeKey(llmConfig.apiKey),
-      apiUrl: llmConfig.apiUrl,
-      model: llmConfig.model,
-      temperature: llmConfig.temperature,
-      abbrMaxLen: llmConfig.abbrMaxLen,
-      industryContext: llmConfig.industryContext,
-      isDefault: saveForm.isDefault
-    }
+  const config = buildCurrentLlmConfigPayload(saveForm.name, saveForm.isDefault)
   const existingIndex = savedConfigs.value.findIndex(c => c.name === config.name)
   if (existingIndex >= 0) {
     savedConfigs.value[existingIndex] = config
@@ -2017,7 +2013,15 @@ const saveConfig = () => {
   apiKeySaved.value = true
   llmConfig.apiKey = decodeKey(config.apiKey)
   saveDialogVisible.value = false
-  ElMessage.success('配置保存成功')
+  ElMessage.success('LLM 配置另存成功')
+}
+
+const saveProjectConfig = () => {
+  localStorage.setItem(PROJECT_CONFIG_STORAGE_KEY, JSON.stringify({
+    abbrMaxLen: llmConfig.abbrMaxLen,
+    industryContext: llmConfig.industryContext || ''
+  }))
+  ElMessage.success('项目配置保存成功')
 }
 
 const setAsDefault = () => {
@@ -2053,14 +2057,12 @@ watch(selectedConfig, (newVal) => {
         llmConfig.apiKey = ''
         apiKeySaved.value = false
       }
-        llmConfig.apiUrl = config.apiUrl
-        llmConfig.model = config.model
-        llmConfig.temperature = config.temperature !== undefined ? config.temperature : 0.3
-        llmConfig.abbrMaxLen = config.abbrMaxLen !== undefined ? config.abbrMaxLen : 4
-        llmConfig.industryContext = config.industryContext || ''
-      }
+      llmConfig.apiUrl = config.apiUrl
+      llmConfig.model = config.model
+      llmConfig.temperature = config.temperature !== undefined ? config.temperature : 0.3
     }
-  })
+  }
+})
 
 const testConnection = async () => {
   if (!llmConfig.apiKey) {
@@ -2381,6 +2383,116 @@ const saveStandards = async () => {
   }
 }
 
+const loadPromptSegments = async () => {
+  promptSegmentsLoading.value = true
+  try {
+    const response = await axios.get('/api/prompt-segments')
+    if (response.data.code === 0 && Array.isArray(response.data.data)) {
+      promptSegments.value = response.data.data
+      promptSegmentsMigrationNotice.value = response.data.migration_notice || ''
+      activePromptSegments.value = response.data.data.map(item => item.key)
+      if (!selectedPromptSegmentKey.value && response.data.data.length > 0) {
+        selectedPromptSegmentKey.value = response.data.data[0].key
+      }
+    } else {
+      ElMessage.error(response.data.message || '加载分段提示词失败')
+    }
+  } catch (error) {
+    console.error('加载分段提示词失败:', error)
+    ElMessage.error('加载分段提示词失败: ' + (error.message || '未知错误'))
+  } finally {
+    promptSegmentsLoading.value = false
+  }
+}
+
+const savePromptSegments = async () => {
+  promptSegmentsSaving.value = true
+  try {
+    const response = await axios.post('/api/prompt-segments', {
+      segments: promptSegments.value.map(item => ({
+        key: item.key,
+        guidance: item.guidance || ''
+      }))
+    })
+    if (response.data.code === 0) {
+      promptSegments.value = response.data.data || promptSegments.value
+      promptSegmentsMigrationNotice.value = response.data.migration_notice || ''
+      ElMessage.success('分段提示词保存成功')
+    } else {
+      ElMessage.error(response.data.message || '保存分段提示词失败')
+    }
+  } catch (error) {
+    ElMessage.error('保存分段提示词失败: ' + (error.message || '未知错误'))
+  } finally {
+    promptSegmentsSaving.value = false
+  }
+}
+
+const savePromptSegment = async (segment) => {
+  if (!segment?.key) return
+  promptSegmentSavingMap.value = { ...promptSegmentSavingMap.value, [segment.key]: true }
+  try {
+    const response = await axios.put(`/api/prompt-segments/${segment.key}`, {
+      guidance: segment.guidance || ''
+    })
+    if (response.data.code === 0) {
+      promptSegments.value = response.data.data || promptSegments.value
+      ElMessage.success(`${segment.title || '本段'}保存成功`)
+    } else {
+      ElMessage.error(response.data.message || '保存本段提示词失败')
+    }
+  } catch (error) {
+    ElMessage.error('保存本段提示词失败: ' + (error.message || '未知错误'))
+  } finally {
+    promptSegmentSavingMap.value = { ...promptSegmentSavingMap.value, [segment.key]: false }
+  }
+}
+
+const resetPromptSegments = async () => {
+  promptSegmentsLoading.value = true
+  try {
+    const response = await axios.post('/api/prompt-segments/reset')
+    if (response.data.code === 0) {
+      promptSegments.value = response.data.data || []
+      promptSegmentsMigrationNotice.value = ''
+      activePromptSegments.value = promptSegments.value.map(item => item.key)
+      selectedPromptSegmentKey.value = promptSegments.value[0]?.key || ''
+      ElMessage.success('已恢复内置分段提示词')
+    } else {
+      ElMessage.error(response.data.message || '恢复内置分段提示词失败')
+    }
+  } catch (error) {
+    ElMessage.error('恢复内置分段提示词失败: ' + (error.message || '未知错误'))
+  } finally {
+    promptSegmentsLoading.value = false
+  }
+}
+
+const resetPromptSegment = async (segment) => {
+  if (!segment?.key) return
+  promptSegmentResettingMap.value = { ...promptSegmentResettingMap.value, [segment.key]: true }
+  try {
+    const response = await axios.post(`/api/prompt-segments/${segment.key}/reset`)
+    if (response.data.code === 0) {
+      promptSegments.value = response.data.data || promptSegments.value
+      promptSegmentsMigrationNotice.value = ''
+      ElMessage.success(`${segment.title || '本段'}已恢复内置`)
+    } else {
+      ElMessage.error(response.data.message || '恢复本段内置提示词失败')
+    }
+  } catch (error) {
+    ElMessage.error('恢复本段内置提示词失败: ' + (error.message || '未知错误'))
+  } finally {
+    promptSegmentResettingMap.value = { ...promptSegmentResettingMap.value, [segment.key]: false }
+  }
+}
+
+const selectPromptSegment = (segment) => {
+  if (!segment?.key) return
+  selectedPromptSegmentKey.value = segment.key
+  activePromptSegments.value = [segment.key]
+}
+
 const handleBatchFileChange = (file) => {
   const uploadRef = batchUpload.value
   if (uploadRef) {
@@ -2514,7 +2626,6 @@ const startTextGenerate = async () => {
       },
       description: description.value,
       db_type: batchDbType.value,
-      custom_prompt: customPrompt.value,
       root_match_priority: batchRootPriority.value,
       cut_mode: batchCutMode.value,
       enable_validation: batchEnableValidation.value,
@@ -2611,7 +2722,6 @@ const startBatchGenerate = async () => {
   formData.append('enable_validation', batchEnableValidation.value)
   formData.append('max_workers', batchMaxWorkers.value)
     formData.append('task_id', currentTaskId.value)
-    formData.append('custom_prompt', customPrompt.value)
     formData.append('temperature', llmConfig.temperature)
     formData.append('abbr_max_len', llmConfig.abbrMaxLen)
 
@@ -2706,6 +2816,20 @@ const startProgressPolling = () => {
           if (new_roots && new_roots.length > 0) {
             batchNewRoots.value = new_roots
           }
+
+          if (progress.failed || progress.cancelled) {
+            stopProgressPolling()
+            batchGenerating.value = false
+            if (progress.cancelled) {
+              batchProgress.value = progress.stage || '⛔ 任务已终止'
+              ElMessage.info(progress.message || '任务已终止')
+            } else {
+              batchProgress.value = progress.stage || `❌ ${progress.message || '任务执行失败'}`
+              ElMessage.error(progress.message || '任务执行失败')
+            }
+            currentTaskId.value = ''
+            return
+          }
           
           if (current >= total) {
             await fetchBatchResult()
@@ -2748,6 +2872,7 @@ const fetchBatchResult = async () => {
       return
     } else {
       shouldStopPolling = true
+      batchProgress.value = `❌ ${response.data.message || '任务执行失败'}`
       ElMessage.error(response.data.message || '任务执行失败')
     }
   } catch (error) {
@@ -2774,9 +2899,12 @@ const cancelBatchTask = async () => {
       batchGenerating.value = false
       batchProgress.value = '⛔ 任务已终止'
       stopProgressPolling()
+      currentTaskId.value = ''
+    } else {
+      ElMessage.error(response.data.message || '终止任务失败')
     }
   } catch (error) {
-    ElMessage.error('终止任务失败: ' + (error.message || '未知错误'))
+    ElMessage.error('终止任务失败: ' + (error.response?.data?.message || error.response?.data?.detail || error.message || '未知错误'))
   }
 }
 
@@ -2977,9 +3105,16 @@ const formatRootPriority = (priority) => {
   return priority === 'full' ? '全称' : '缩写'
 }
 
+const formatHistoryDescription = (text) => {
+  if (!text) return '-'
+  return String(text)
+    .replace(/^\s*(批量建表|单独建表|单一建表)\s*[:：\-—]?\s*/u, '')
+    .trim() || '-'
+}
+
 const viewHistoryDDL = (record) => {
   currentHistoryDDL.value = record.ddl
-  currentHistoryTitle.value = `记录 ${record.id} - ${record.description}`
+  currentHistoryTitle.value = `记录 ${record.id} - ${formatHistoryDescription(record.description)}`
   currentHistoryRecord.value = record
   historyViewDialog.value = true
 }
@@ -3272,15 +3407,30 @@ const processTables = (html) => {
   return result.join('\n')
 }
 
+const extractRootArray = (response) => {
+  const payload = response?.data
+  if (payload?.code === 0 && Array.isArray(payload.data)) return payload.data
+  if (Array.isArray(payload)) return payload
+  return []
+}
+
 const loadGovernanceData = async () => {
-  try {
-    const s = await axios.get("/api/standard-roots")
-    const h = await axios.get("/api/historical-roots")
-    standardRoots.value = s.data.code === 0 && Array.isArray(s.data.data) ? s.data.data.map(normalizeRootItem) : []
-    historicalRoots.value = h.data.code === 0 && Array.isArray(h.data.data) ? h.data.data.map(normalizeRootItem) : []
-  } catch (e) {
-    console.error(e)
+  const [standardResult, historicalResult] = await Promise.allSettled([
+    axios.get('/api/standard-roots').catch(() => axios.get('/api/word-roots')),
+    axios.get('/api/historical-roots')
+  ])
+
+  if (standardResult.status === 'fulfilled') {
+    standardRoots.value = extractRootArray(standardResult.value).map(normalizeRootItem)
+  } else {
+    console.error('加载标准词根失败:', standardResult.reason)
     standardRoots.value = []
+  }
+
+  if (historicalResult.status === 'fulfilled') {
+    historicalRoots.value = extractRootArray(historicalResult.value).map(normalizeRootItem)
+  } else {
+    console.error('加载历史词根失败:', historicalResult.reason)
     historicalRoots.value = []
   }
 }
@@ -3590,22 +3740,6 @@ const clearHistoricalRoots = async () => {
   }
 }
 
-const resetPrompt = async () => {
-  try {
-    const response = await axios.post('/api/custom-prompt/reset')
-    if (response.data.code === 0 && response.data.data) {
-      customPrompt.value = response.data.data
-      ElMessage.success('已重置为内置默认提示词')
-    } else {
-      customPrompt.value = DEFAULT_PROMPT
-      ElMessage.warning('重置失败，已使用本地默认提示词')
-    }
-  } catch (error) {
-    console.error('重置提示词失败:', error)
-    customPrompt.value = DEFAULT_PROMPT
-    ElMessage.warning('重置失败，已使用本地默认提示词')
-  }
-}
 
 const copySQL = async () => {
   if (!generatedSQL.value) return
@@ -3678,7 +3812,6 @@ const generateDDL = async () => {
       },
       description: description.value,
       db_type: dbType.value,
-      custom_prompt: customPrompt.value,
       root_match_priority: rootMatchPriority.value,
       history_roots: [],
       enable_validation: enableValidation.value
@@ -3749,7 +3882,9 @@ watch(activeMenu, (menu) => {
 
 onMounted(() => {
   loadConfigs()
+  loadProjectConfig()
   loadStandards()
+  loadPromptSegments()
   loadHistory()
   loadDbConnections()
   loadGovernanceData()
@@ -3769,6 +3904,111 @@ html {
 
 body {
   font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+.prompt-segments-card {
+  margin-bottom: 20px;
+}
+
+.prompt-segments-alert {
+  margin-bottom: 16px;
+}
+
+.prompt-segment-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.prompt-segment-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.prompt-segment-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 16px;
+  flex-shrink: 0;
+}
+
+.prompt-segment-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.prompt-guidance-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.prompt-guidance-tip {
+  margin-top: 12px;
+}
+
+.prompt-preview-details {
+  margin-top: 14px;
+  border: 1px solid #dbe7f5;
+  border-radius: 10px;
+  background: #fbfdff;
+  overflow: hidden;
+}
+
+.prompt-preview-details summary {
+  cursor: pointer;
+  padding: 12px 14px;
+  color: #1f2937;
+  font-weight: 600;
+  list-style: none;
+}
+
+.prompt-preview-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.prompt-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 0 14px 14px;
+}
+
+.prompt-preview-card {
+  border: 1px solid #dbe7f5;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.prompt-preview-title {
+  padding: 10px 12px;
+  border-bottom: 1px solid #e5edf7;
+  font-weight: 600;
+  color: #344054;
+}
+
+.prompt-preview-text {
+  margin: 0;
+  padding: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.65;
+  color: #475467;
+}
+
+.prompt-segment-label {
+  margin-bottom: 8px;
+  color: #303133;
+  font-weight: 600;
 }
 
 .app-wrapper {
@@ -3847,7 +4087,7 @@ body {
   flex-direction: column;
   min-height: 100vh;
   background: #F0F2F5;
-  padding-bottom: 60px;
+  padding-bottom: 0;
 }
 
 .header {
@@ -3968,10 +4208,6 @@ body {
   gap: 20px;
 }
 
-.side-by-side-container .prompt-card {
-  flex: 1;
-  min-width: 300px;
-}
 
 .side-by-side-container .history-card {
   flex: 2;
@@ -4075,6 +4311,134 @@ body {
 .key-placeholder {
   color: #909399;
   font-size: 14px;
+}
+
+.legacy-config-card {
+  display: none;
+}
+
+.logo-sub {
+  margin-top: 3px;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 11px;
+}
+
+.sidebar-note {
+  display: none;
+}
+
+.page-intro {
+  margin-bottom: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: end;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #1467d8;
+  font-size: 12px;
+  font-weight: 760;
+  margin-bottom: 7px;
+}
+
+.eyebrow .el-icon, .card-title .el-icon, .nav-icon .el-icon, .header-actions .el-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.page-intro h1 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.28;
+  font-weight: 780;
+  color: #152033;
+}
+
+.intro-text {
+  margin: 7px 0 0;
+  color: #667085;
+  line-height: 1.65;
+  font-size: 14px;
+}
+
+.config-split {
+  display: grid;
+  gap: 16px;
+}
+
+.panel {
+  background: #fff;
+  border: 1px solid #dbe7f5;
+  border-radius: 8px;
+  box-shadow: 0 10px 26px rgba(16, 82, 160, 0.08);
+  overflow: hidden;
+}
+
+.panel + .panel, .config-split + .panel {
+  margin-top: 16px;
+}
+
+.panel-header {
+  min-height: 52px;
+  padding: 13px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #dbe7f5;
+  background: linear-gradient(180deg, #fff, #f8fbff);
+}
+
+.panel-body {
+  padding: 16px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.field {
+  display: grid;
+  gap: 7px;
+}
+
+.field.full {
+  grid-column: 1 / -1;
+}
+
+.field label, .config-label {
+  color: #344054;
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.slider-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 74px;
+  gap: 12px;
+  align-items: center;
+}
+
+.hint-box {
+  color: #667085;
+  background: #f8fbff;
+  border: 1px solid #dbe7f5;
+  border-radius: 8px;
+  padding: 11px 12px;
+  line-height: 1.65;
+  font-size: 13px;
+}
+
+.table-wrap {
+  overflow: auto;
+  border: 1px solid #dbe7f5;
+  border-radius: 8px;
 }
 
 .upload-section {
@@ -4254,9 +4618,9 @@ body {
 }
 
 .history-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: block;
+  width: 100%;
+  overflow: auto;
 }
 
 .root-tag {
@@ -4648,10 +5012,12 @@ body {
 }
 
 .history-view {
-  padding: 20px;
+  padding: 0;
   height: calc(100vh - 180px);
   display: flex;
   flex-direction: column;
+  max-width: none;
+  width: 100%;
 }
 
 .history-view .config-card {
@@ -4670,12 +5036,25 @@ body {
 
 .history-list {
   flex: 1;
-  overflow-y: auto;
+  display: block;
+  width: 100%;
+  overflow: auto;
   min-height: 0;
 }
 
 .history-list .el-table {
   height: 100%;
+  min-width: 1400px;
+}
+
+.history-list .el-table .cell {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-list .el-table .el-table__cell {
+  white-space: nowrap;
 }
 
 .history-list .el-table :deep(.el-scrollbar__view) {
@@ -4699,19 +5078,7 @@ body {
 }
 
 .footer {
-  position: fixed;
-  bottom: 0;
-  left: 220px;
-  right: 0;
-  height: 48px;
-  background: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #909399;
-  font-size: 13px;
-  border-top: 1px solid #ebeef5;
-  z-index: 100;
+  display: none;
 }
 
 .field-stats-section {
@@ -4970,6 +5337,443 @@ body {
 
 .line-fill.completed {
   width: 100%;
+}
+
+/* newdemo.html parity overrides: sidebar + base configuration page */
+:root {
+  --brand-900: #07336f;
+  --brand-800: #0c4a9a;
+  --brand-700: #1467d8;
+  --brand-600: #1f7aea;
+  --brand-500: #2f8fff;
+  --brand-100: #e8f3ff;
+  --brand-50: #f5f9ff;
+  --cyan: #13b5d1;
+  --green: #20b26b;
+  --red: #e5484d;
+  --ink-900: #152033;
+  --ink-700: #344054;
+  --ink-500: #667085;
+  --ink-300: #98a2b3;
+  --line: #dbe7f5;
+  --line-strong: #c3d7ee;
+  --panel: #ffffff;
+  --page: #f4f8fd;
+  --shadow: 0 10px 26px rgba(16, 82, 160, 0.08);
+  --radius: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--ink-900);
+  background:
+    linear-gradient(180deg, rgba(232, 243, 255, 0.92), rgba(244, 248, 253, 0.8) 260px),
+    var(--page);
+  font-family: "Inter", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+}
+
+.app-wrapper {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 208px minmax(0, 1fr);
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  left: auto;
+  width: auto;
+  height: 100vh;
+  padding: 16px 12px;
+  background: linear-gradient(180deg, #0b438d 0%, #082f6e 100%);
+  color: #fff;
+  border-right: 1px solid rgba(255, 255, 255, 0.16);
+  display: block;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 6px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.logo-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius);
+  display: grid;
+  place-items: center;
+  color: var(--brand-800);
+  background: linear-gradient(135deg, #fff, #cbe8ff);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.16);
+  font-size: 0;
+}
+
+.logo-icon .el-icon,
+.logo-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.logo-text {
+  color: #fff;
+  font-size: 15px;
+  font-weight: 760;
+  line-height: 1.25;
+}
+
+.nav-menu {
+  display: grid;
+  gap: 5px;
+  margin-top: 18px;
+  padding: 0;
+}
+
+.nav-item {
+  width: 100%;
+  height: 44px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.78);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  cursor: pointer;
+  text-align: left;
+  transition: 150ms ease;
+}
+
+.nav-item:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.nav-item.active {
+  color: #fff;
+  background: linear-gradient(90deg, rgba(255,255,255,0.24), rgba(255,255,255,0.08));
+  box-shadow: inset 3px 0 0 #7bdcff;
+  border-left: 0;
+}
+
+.nav-icon {
+  width: 20px;
+  height: 20px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  font-size: 0;
+}
+
+.nav-icon .el-icon,
+.nav-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.nav-text {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.main-container {
+  min-width: 0;
+  margin-left: 0;
+  min-height: 100vh;
+  padding-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  background: transparent;
+}
+
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  height: 64px;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(255, 255, 255, 0.78);
+  border-bottom: 1px solid rgba(195, 215, 238, 0.72);
+  box-shadow: none;
+  backdrop-filter: blur(12px);
+}
+
+.header-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink-900);
+  font-size: 18px;
+  font-weight: 760;
+}
+
+.header-title::before {
+  content: "";
+  width: 4px;
+  height: 18px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--brand-500), var(--cyan));
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.content {
+  width: min(1480px, 100%);
+  margin: 0 auto;
+  padding: 22px 24px 34px;
+  flex: 1;
+}
+
+.config-view {
+  display: block;
+  animation: none;
+}
+
+.config-view .page-intro {
+  margin-bottom: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: end;
+}
+
+.config-view .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--brand-700);
+  font-size: 12px;
+  font-weight: 760;
+  margin-bottom: 7px;
+}
+
+.config-view .page-intro h1 {
+  margin: 0;
+  color: var(--ink-900);
+  font-size: 24px;
+  line-height: 1.28;
+  font-weight: 780;
+}
+
+.config-view .intro-text {
+  margin: 7px 0 0;
+  color: var(--ink-500);
+  line-height: 1.65;
+  font-size: 14px;
+}
+
+.config-view .config-split {
+  display: grid;
+  gap: 16px;
+}
+
+.config-view .panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.config-view .panel + .panel,
+.config-view .config-split + .panel {
+  margin-top: 16px;
+}
+
+.config-view .panel-header {
+  min-height: 52px;
+  padding: 13px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, #fff, #f8fbff);
+}
+
+.config-view .card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-900);
+  font-size: 15px;
+  font-weight: 760;
+}
+
+.config-view .panel-body {
+  padding: 16px;
+}
+
+.config-view .form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.config-view .field {
+  display: grid;
+  gap: 7px;
+}
+
+.config-view .field.full {
+  grid-column: 1 / -1;
+}
+
+.config-view .field label,
+.config-view .config-label {
+  color: var(--ink-700);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.config-view .config-selector {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.config-view .slider-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 74px;
+  gap: 12px;
+  align-items: center;
+}
+
+.config-view .hint-box {
+  color: var(--ink-500);
+  background: #f8fbff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 11px 12px;
+  line-height: 1.65;
+  font-size: 13px;
+}
+
+.config-view .table-wrap {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.config-view .el-input__wrapper,
+.config-view .el-textarea__inner,
+.config-view .el-select__wrapper,
+.config-view .el-input-number .el-input__wrapper {
+  min-height: 36px;
+  border-radius: var(--radius);
+  box-shadow: 0 0 0 1px var(--line-strong) inset;
+}
+
+.config-view .el-input__wrapper.is-focus,
+.config-view .el-select__wrapper.is-focused,
+.config-view .el-textarea__inner:focus {
+  box-shadow:
+    0 0 0 1px var(--brand-500) inset,
+    0 0 0 3px rgba(47, 143, 255, 0.14);
+}
+
+.config-view .el-button {
+  min-height: 34px;
+  border-radius: var(--radius);
+  padding: 0 13px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.config-view .el-button--primary {
+  background: linear-gradient(135deg, var(--brand-700), var(--brand-500));
+  border-color: transparent;
+  box-shadow: 0 8px 18px rgba(31, 122, 234, 0.2);
+}
+
+.config-view .el-button--warning {
+  background: linear-gradient(135deg, #e79005, #f8b43c);
+  border-color: transparent;
+  color: #fff;
+}
+
+.config-view .el-button--danger {
+  background: linear-gradient(135deg, #d93c42, #ef6367);
+  border-color: transparent;
+  color: #fff;
+}
+
+.config-view .el-button--info.is-plain {
+  color: var(--brand-800);
+  background: #fff;
+  border-color: var(--line-strong);
+}
+
+.config-view .el-table {
+  --el-table-header-bg-color: #f3f8ff;
+  --el-table-border-color: #edf3fb;
+  --el-table-row-hover-bg-color: #f8fbff;
+  color: var(--ink-700);
+  font-size: 13px;
+}
+
+.config-view .el-table th.el-table__cell {
+  color: var(--ink-500);
+  font-size: 12px;
+  font-weight: 760;
+  background: #f3f8ff;
+}
+
+.config-view .el-table .el-button.is-link {
+  min-height: 24px;
+  padding: 0 4px;
+  border: 0;
+  box-shadow: none;
+}
+
+@media (max-width: 820px) {
+  .app-wrapper {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: relative;
+    height: auto;
+  }
+
+  .sidebar-note {
+    display: none;
+  }
+
+  .nav-menu {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .header {
+    position: relative;
+    padding: 0 16px;
+  }
+
+  .content {
+    padding: 18px 16px 28px;
+  }
+
+  .config-view .form-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 </style>
